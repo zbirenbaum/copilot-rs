@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+github-device-flow = "0.1.4"
 interfaces = "0.0.8"
 network-interface = "1.0.1"
 oauth2 = "4.4.1"
