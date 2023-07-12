@@ -1,0 +1,16 @@
+[package]
+name = "copilot-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+interfaces = "0.0.8"
+network-interface = "1.0.1"
+oauth2 = "4.4.1"
+sha256 = "1.1.4"
+
+[dependencies.uuid]
+version = "1.3.4"
+features = ["v4", "fast-rng", "macro-diagnostics"]
