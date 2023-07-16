@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 
 #[derive(Deserialize, Serialize, Debug)]
-
 struct HostsFile {
   github_com: UserCredentials,
 }

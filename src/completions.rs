@@ -1,5 +1,5 @@
 use futures_util::stream::StreamExt;
-use eventsource_stream::Eventsource;
+use eventsource_stream::{Eventsource, EventStream};
 use reqwest::RequestBuilder;
 use chrono::Utc;
 use uuid::Uuid;
@@ -8,27 +8,13 @@ use serde_derive::{Deserialize, Serialize};
 pub struct CompletionFetcher { builder: RequestBuilder }
 
 impl CompletionFetcher {
-  pub async fn request(&self, data: CompletionRequest) {
+  pub fn request(&self, data: CompletionRequest) -> RequestBuilder {
     let body = serde_json::to_string(&data).unwrap();
     let request_builder = self.builder.try_clone().unwrap();
-    let mut stream = request_builder
+    return request_builder
       .header("X-Request-Id", Uuid::new_v4().to_string())
       .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
       .body(body)
-      .send()
-      .await.unwrap()
-      .bytes_stream()
-      .eventsource();
-    while let Some(event) = stream.next().await {
-      match event {
-        Ok(event) => println!(
-          "received event[type={}]: {}",
-          event.event,
-          event.data
-        ),
-        Err(e) => eprintln!("error occured: {}", e),
-      }
-    }
   }
 
   pub fn new(builder: RequestBuilder) -> Self {
