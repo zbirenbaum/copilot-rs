@@ -1,12 +1,10 @@
-mod utils;
-mod auth;
 mod reader;
+mod completions;
 
-fn main() {
-  let mac_addr = utils::get_mac_addr();
-  // let device_auth = auth::device_auth();
-  let (user, token) = reader::read_config();
-  println!("{:?}", user);
-  println!("{:?}", token);
-  println!("MAC address: {}", mac_addr);
+#[tokio::main]
+async fn main() {
+  let (user, user_token) = reader::read_config();
+  let copilot_token = completions::get_copilot_token(&user_token).await.unwrap();
+  let builder = completions::build_headers(&copilot_token).unwrap();
+  completions::stream_completions(builder).await;
 }
