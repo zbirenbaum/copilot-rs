@@ -1,22 +1,18 @@
+use completions::CompletionFetcher;
 use serde_json::Value;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 mod reader;
 mod completions;
 mod auth;
-use std::fs::File;
 use tower_lsp::jsonrpc::Result;
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::*;
-use tower_lsp::lsp_types::notification::LogMessage;
 use futures_util::stream::StreamExt;
-use reqwest::RequestBuilder;
-use eventsource_stream::{Eventsource, EventStream};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use eventsource_stream::{Eventsource};
 
 struct Copilot {
- client: Client,
- fetcher: completions::CompletionFetcher,
+  client: Client,
+  fetcher: completions::CompletionFetcher,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -55,26 +51,31 @@ struct CopilotCompletionParams {
 }
 
 impl Copilot {
-  async fn get_completions_cycling(&self, params: CopilotCompletionParams) {
+  async fn get_completions_cycling(&self, _params: CopilotCompletionParams) -> Result<Option<CompletionResponse>> {
     self.client.log_message(MessageType::ERROR, "FUCKYES").await;
     let data = get_test_request();
-    self.client.log_message(MessageType::ERROR, "Here bby").await;
     let mut stream = self.fetcher.request(data)
       .send()
       .await.unwrap()
       .bytes_stream()
       .eventsource();
+    let mut choices = Vec::<CompletionItem>::new();
     while let Some(event) = stream.next().await {
       match event {
         Ok(event) => {
-          println!( "received event[type={}]: {}", event.event, event.data);
-          self.client.log_message(MessageType::ERROR, "FUCKYES").await;
+          if event.data == "[DONE]" { break; }
+          let resp: completions::CopilotResponse = serde_json::from_str(&event.data).unwrap();
+          let it = &resp.choices;
+          for i in it.iter() {
+            choices.push(CompletionItem::new_simple(i.text.to_string(), "More detail".to_string()))
+          }
         },
         Err(e) => println!("error occured: {}", e),
       }
     }
+    let resp = CompletionResponse::Array(choices);
+    Ok(Some(resp))
   }
-
 }
 
 #[tower_lsp::async_trait]
@@ -106,7 +107,6 @@ impl LanguageServer for Copilot {
         }),
         ..ServerCapabilities::default()
       },
-      ..Default::default()
     })
   }
 
@@ -175,49 +175,31 @@ impl LanguageServer for Copilot {
       .log_message(MessageType::INFO, "file closed!")
       .await;
   }
-
-  async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-    Ok(Some(CompletionResponse::Array(vec![
-      CompletionItem::new_simple("Hello".to_string(), "Some detail".to_string()),
-      CompletionItem::new_simple("Bye".to_string(), "More detail".to_string()),
-    ])))
-  }
 }
 
 #[tokio::main]
 async fn main() {
+  async fn start_server(fetcher: CompletionFetcher) {
+    tracing_subscriber::fmt().init();
+    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    #[cfg(feature = "runtime-agnostic")]
+    let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
+
+
+    let (service, socket) = LspService::build(|client| Copilot { client, fetcher })
+      .custom_method("getCompletionsCycling", Copilot::get_completions_cycling)
+      .custom_method("getCompletions", Copilot::get_completions_cycling)
+      .custom_method("TextDocument/completions", Copilot::get_completions_cycling)
+      .finish();
+    println!("Listening on stdin/stdout");
+    Server::new(stdin, stdout, socket).serve(service).await;
+  }
+
   let user_token = reader::read_config();
   let copilot_token = auth::get_copilot_token(&user_token).await.unwrap();
   let builder = auth::get_request_builder(&copilot_token).unwrap();
   let fetcher = completions::CompletionFetcher::new(builder);
-
-  tracing_subscriber::fmt().init();
-  let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-  #[cfg(feature = "runtime-agnostic")]
-  let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
-
-
-  let (service, socket) = LspService::build(|client| Copilot { client, fetcher })
-    .custom_method("getCompletionsCycling", Copilot::get_completions_cycling)
-    .custom_method("getCompletions", Copilot::get_completions_cycling)
-    .custom_method("TextDocument/completions", Copilot::get_completions_cycling)
-    .finish();
-  println!("Listening on stdin/stdout");
-  Server::new(stdin, stdout, socket).serve(service).await;
-
-  // let stdin = tokio::io::stdin();
-  // let stdout = tokio::io::stdout();
-
-  // let (service, messages) = LspService::builder(|client| Backend { client })
-  //   .with_method("custom/request", Backend::custom_request)
-  //   .with_method("custom/notification", Backend::custom_notification)
-  //   .with_method("custom/noParamsWorksToo", Backend::no_params_works_too)
-  //   .finish();
-  //
-  // Server::new(stdin, stdout)
-  //   .interleave(messages)
-  //   .serve(service)
-  //   .await;
+  start_server(fetcher).await
 }
 
 fn get_test_request() -> completions::CompletionRequest {
