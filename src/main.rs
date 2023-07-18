@@ -1,4 +1,4 @@
-use completions::CompletionFetcher;
+use completions::{CompletionFetcher, CopilotCompletionItem};
 use serde_json::Value;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -25,33 +25,26 @@ struct TextDocument {
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-struct Position {
-  character: i16,
-  line: i16,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
 struct Document {
   indent_size: i8,
   insert_spaces: bool,
-  position: Position,
+  position: tower_lsp::lsp_types::Position,
   relative_path: String,
   tab_size: i8,
   uri: String,
   version: i8,
 }
 
-#[derive(Deserialize, Serialize, Debug,)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct CopilotCompletionParams {
   doc: Document,
   position: Position,
-  text_document: TextDocument,
+  text_document: tower_lsp::lsp_types::TextDocumentItem,
 }
 
 impl Copilot {
-  async fn get_completions_cycling(&self, _params: CopilotCompletionParams) -> Result<Option<CompletionResponse>> {
+  async fn get_completions_cycling(&self, _params: CopilotCompletionParams) -> Result<Option<Vec<CopilotCompletionItem>>> {
     self.client.log_message(MessageType::ERROR, "FUCKYES").await;
     let data = get_test_request();
     let mut stream = self.fetcher.request(data)
@@ -59,7 +52,7 @@ impl Copilot {
       .await.unwrap()
       .bytes_stream()
       .eventsource();
-    let mut choices = Vec::<CompletionItem>::new();
+    let mut choices: Vec<CopilotCompletionItem> = vec![];
     while let Some(event) = stream.next().await {
       match event {
         Ok(event) => {
@@ -67,14 +60,16 @@ impl Copilot {
           let resp: completions::CopilotResponse = serde_json::from_str(&event.data).unwrap();
           let it = &resp.choices;
           for i in it.iter() {
-            choices.push(CompletionItem::new_simple(i.text.to_string(), "More detail".to_string()))
+            self.client.log_message(MessageType::ERROR, "FUCKYES").await;
+            let item = CopilotCompletionItem::new(&i.text.to_string(), &"".to_string(), &"".to_string(), _params.position);
+            choices.push(item);
           }
         },
         Err(e) => println!("error occured: {}", e),
       }
     }
-    let resp = CompletionResponse::Array(choices);
-    Ok(Some(resp))
+    // let resp = CompletionResponse::Array(completions.completions);
+    Ok(Some(choices))
   }
 }
 
