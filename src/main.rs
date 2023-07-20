@@ -11,10 +11,12 @@ use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
   document_map: DashMap<String, Rope>,
+  language_map: DashMap<String, String>,
   copilot_handler: copilot::CopilotHandler
 }
 
@@ -64,6 +66,7 @@ impl LanguageServer for CopilotLSP {
     self.client
       .log_message(MessageType::INFO, "file opened!")
       .await;
+    self.language_map.insert(params.text_document.uri.to_string(), params.text_document.language_id);
     self.on_change(TextDocumentItem {
       uri: params.text_document.uri,
       text: params.text_document.text,
@@ -98,14 +101,20 @@ impl LanguageServer for CopilotLSP {
     let rope = self.document_map.get(&uri.to_string()).unwrap();
     let line = rope.get_line(position.line as usize);
     let char = rope.try_line_to_char(position.line as usize).ok().unwrap();
+    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
+    println!("Language: {}", &language);
     self.client
-      .log_message(MessageType::ERROR, &line.unwrap().to_string()).await;
-    let offset = char + position.character as usize;
-    let completion_request = self.copilot_handler.completion_params_to_request(params, &rope);
-    let s = format!("{:?}", completion_request);
-    self.client
-      .log_message(MessageType::ERROR, s)
+      .log_message(MessageType::ERROR, &language)
       .await;
+
+    self.client.log_message(MessageType::ERROR, &line.unwrap().to_string()).await;
+
+    let offset = char + position.character as usize;
+    let completion_request = self.copilot_handler.completion_params_to_request(language, params, &rope);
+    // let s = format!("{:?}", completion_request);
+    // self.client
+    //   .log_message(MessageType::ERROR, s)
+    //   .await;
     let items = self.copilot_handler.stream_completions(completion_request).await.unwrap();
     let mut completions: Vec<CompletionItem> = vec![];
     match items {
@@ -167,6 +176,8 @@ struct InlayHintParams {
   path: String,
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct TextDocumentItem {
   uri: Url,
   text: String,
@@ -177,7 +188,7 @@ impl CopilotLSP {
   async fn on_change(&self, params: TextDocumentItem) {
     let rope = ropey::Rope::from_str(&params.text);
     self.document_map
-      .insert(params.uri.to_string(), rope.clone());
+      .insert(params.uri.to_string(), rope);
   }
   async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
     self.completion(params).await
@@ -195,7 +206,7 @@ async fn main() {
   #[cfg(feature = "runtime-agnostic")]
   let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
 
-  let (service, socket) = LspService::build(|client| CopilotLSP {client, document_map: DashMap::new(), copilot_handler})
+  let (service, socket) = LspService::build(|client| CopilotLSP {client, document_map: DashMap::new(), language_map: DashMap::new(), copilot_handler})
     .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
     .finish();
   Server::new(stdin, stdout, socket).serve(service).await;

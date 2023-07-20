@@ -23,9 +23,11 @@ mod auth;
 #[serde(rename_all = "camelCase")]
 struct TextDocument {
   relative_path: String,
+  language_id: String,
   uri: String,
   version: i16,
 }
+
 //
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -71,7 +73,7 @@ impl CopilotHandler {
     Self { builder }
   }
 
-  pub fn completion_params_to_request(&self, params: CompletionParams, rope: &Rope) -> CompletionRequest {
+  pub fn completion_params_to_request(&self, language: String, params: CompletionParams, rope: &Rope) -> CompletionRequest {
     let prefix = (|| {
       let start_idx = rope.line_to_char(0);
       let char_pos = rope.line_to_char(params.text_document_position.position.character as usize);
@@ -85,7 +87,7 @@ impl CopilotHandler {
       return rope.slice(start_idx+start_char..end_idx).to_string()
     })();
     let _params = builder::CompletionParams {
-      language: "lua".to_string(),
+      language,
       next_indent: 0,
       trim_by_indentation: true,
       prompt_tokens: prefix.len() as i32,
