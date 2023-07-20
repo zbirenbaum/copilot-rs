@@ -7,8 +7,11 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.26"
+dashmap = "5.5.0"
+env_logger = "0.10.0"
 eventsource-stream = "0.2.3"
 exitfailure = "0.5.1"
+futures = "0.3.28"
 futures-util = "0.3.28"
 github-device-flow = "0.1.4"
 http = "0.2.9"
@@ -17,13 +20,14 @@ network-interface = "1.0.1"
 oauth2 = "4.4.1"
 reqwest = "0.11.18"
 reqwest-eventsource = "0.4.0"
+ropey = "1.6.0"
 serde = "1.0.171"
 serde_derive = "1.0.171"
 serde_json = "1.0.102"
 sha256 = "1.1.4"
 tokio = { version = "1.29.1", features = ["full"] }
 tokio-util = { version = "0.7.8", features = ["full"] }
-tower-lsp = "0.19.0"
+tower-lsp = { version = "0.19.0", features = ["proposed"]}
 tracing-subscriber = "0.3.17"
 
 [dependencies.uuid]

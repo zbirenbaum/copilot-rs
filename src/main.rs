@@ -1,93 +1,38 @@
-use completions::{CompletionFetcher, CopilotCompletionItem};
+mod copilot;
+use futures::StreamExt;
+use futures::FutureExt;
+use std::collections::HashMap;
+use dashmap::DashMap;
+use ropey::Rope;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-mod reader;
-mod completions;
-mod auth;
-use tower_lsp::jsonrpc::Result;
-use serde::{Deserialize, Serialize};
-use futures_util::stream::StreamExt;
-use eventsource_stream::{Eventsource};
 
-struct Copilot {
+#[derive(Debug)]
+struct CopilotLSP {
   client: Client,
-  fetcher: completions::CompletionFetcher,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct TextDocument {
-  relative_path: String,
-  uri: String,
-  version: i16,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct Document {
-  indent_size: i8,
-  insert_spaces: bool,
-  position: tower_lsp::lsp_types::Position,
-  relative_path: String,
-  tab_size: i8,
-  uri: String,
-  version: i8,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct CopilotCompletionParams {
-  doc: Document,
-  position: Position,
-  text_document: tower_lsp::lsp_types::TextDocumentItem,
-}
-
-impl Copilot {
-  async fn get_completions_cycling(&self, _params: CopilotCompletionParams) -> Result<Option<Vec<CopilotCompletionItem>>> {
-    self.client.log_message(MessageType::ERROR, "FUCKYES").await;
-    let data = get_test_request();
-    let mut stream = self.fetcher.request(data)
-      .send()
-      .await.unwrap()
-      .bytes_stream()
-      .eventsource();
-    let mut choices: Vec<CopilotCompletionItem> = vec![];
-    while let Some(event) = stream.next().await {
-      match event {
-        Ok(event) => {
-          if event.data == "[DONE]" { break; }
-          let resp: completions::CopilotResponse = serde_json::from_str(&event.data).unwrap();
-          let it = &resp.choices;
-          for i in it.iter() {
-            self.client.log_message(MessageType::ERROR, "FUCKYES").await;
-            let item = CopilotCompletionItem::new(&i.text.to_string(), &"".to_string(), &"".to_string(), _params.position);
-            choices.push(item);
-          }
-        },
-        Err(e) => println!("error occured: {}", e),
-      }
-    }
-    // let resp = CompletionResponse::Array(completions.completions);
-    Ok(Some(choices))
-  }
+  document_map: DashMap<String, Rope>,
+  copilot_handler: copilot::CopilotHandler
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for Copilot {
+impl LanguageServer for CopilotLSP {
   async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
     Ok(InitializeResult {
       server_info: None,
+      offset_encoding: None,
       capabilities: ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(
-          TextDocumentSyncKind::INCREMENTAL,
-        )),
+        inlay_hint_provider: Some(OneOf::Left(true)),
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         completion_provider: Some(CompletionOptions {
           resolve_provider: Some(false),
           trigger_characters: Some(vec![".".to_string()]),
           work_done_progress_options: Default::default(),
           all_commit_characters: None,
-          ..Default::default()
+          completion_item: None,
         }),
         execute_command_provider: Some(ExecuteCommandOptions {
           commands: vec!["dummy.do_something".to_string()],
@@ -100,11 +45,11 @@ impl LanguageServer for Copilot {
           }),
           file_operations: None,
         }),
+        semantic_tokens_provider: None,
         ..ServerCapabilities::default()
       },
     })
   }
-
   async fn initialized(&self, _: InitializedParams) {
     self.client
       .log_message(MessageType::INFO, "initialized!")
@@ -115,15 +60,84 @@ impl LanguageServer for Copilot {
     Ok(())
   }
 
-  async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
+  async fn did_open(&self, params: DidOpenTextDocumentParams) {
     self.client
-      .log_message(MessageType::INFO, "workspace folders changed!")
+      .log_message(MessageType::INFO, "file opened!")
       .await;
+    self.on_change(TextDocumentItem {
+      uri: params.text_document.uri,
+      text: params.text_document.text,
+      version: params.text_document.version,
+    })
+    .await
+  }
+
+  async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+    self.on_change(TextDocumentItem {
+      uri: params.text_document.uri,
+      text: std::mem::take(&mut params.content_changes[0].text),
+      version: params.text_document.version,
+    })
+    .await
+  }
+
+  async fn did_save(&self, _: DidSaveTextDocumentParams) {
+    self.client
+      .log_message(MessageType::INFO, "file saved!")
+      .await;
+  }
+  async fn did_close(&self, _: DidCloseTextDocumentParams) {
+    self.client
+      .log_message(MessageType::INFO, "file closed!")
+      .await;
+  }
+  async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    let uri = &params.text_document_position.text_document.uri;
+    let position = &params.text_document_position.position;
+
+    let rope = self.document_map.get(&uri.to_string()).unwrap();
+    let line = rope.get_line(position.line as usize);
+    let char = rope.try_line_to_char(position.line as usize).ok().unwrap();
+    self.client
+      .log_message(MessageType::ERROR, &line.unwrap().to_string()).await;
+    let offset = char + position.character as usize;
+    let completion_request = self.copilot_handler.completion_params_to_request(params, &rope);
+    let s = format!("{:?}", completion_request);
+    self.client
+      .log_message(MessageType::ERROR, s)
+      .await;
+    let items = self.copilot_handler.stream_completions(completion_request).await.unwrap();
+    let mut completions: Vec<CompletionItem> = vec![];
+    match items {
+      Some(items) => {
+        for item in items {
+          completions.push(CompletionItem {
+            label: item.clone(),
+            insert_text: Some(item.clone()),
+            kind: Some(CompletionItemKind::TEXT),
+            detail: Some(item),
+            ..Default::default()
+          });
+        }
+      }
+      None => {
+        self.client
+          .log_message(MessageType::WARNING, "No completions received!")
+          .await;
+        }
+    }
+    Ok(Some(CompletionResponse::Array(completions)))
   }
 
   async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
     self.client
       .log_message(MessageType::INFO, "configuration changed!")
+      .await;
+  }
+
+  async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
+    self.client
+      .log_message(MessageType::INFO, "workspace folders changed!")
       .await;
   }
 
@@ -146,76 +160,50 @@ impl LanguageServer for Copilot {
 
     Ok(None)
   }
+}
 
-  async fn did_open(&self, _: DidOpenTextDocumentParams) {
-    self.client
-      .log_message(MessageType::INFO, "file opened!")
-      .await;
+#[derive(Debug, Deserialize, Serialize)]
+struct InlayHintParams {
+  path: String,
+}
+
+struct TextDocumentItem {
+  uri: Url,
+  text: String,
+  version: i32,
+}
+
+impl CopilotLSP {
+  async fn on_change(&self, params: TextDocumentItem) {
+    let rope = ropey::Rope::from_str(&params.text);
+    self.document_map
+      .insert(params.uri.to_string(), rope.clone());
   }
-
-  async fn did_change(&self, _: DidChangeTextDocumentParams) {
-    self.client
-      .log_message(MessageType::INFO, "file changed!")
-      .await;
-  }
-
-  async fn did_save(&self, _: DidSaveTextDocumentParams) {
-    self.client
-      .log_message(MessageType::INFO, "file saved!")
-      .await;
-  }
-
-  async fn did_close(&self, _: DidCloseTextDocumentParams) {
-    self.client
-      .log_message(MessageType::INFO, "file closed!")
-      .await;
+  async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
+    self.completion(params).await
   }
 }
 
 #[tokio::main]
 async fn main() {
-  async fn start_server(fetcher: CompletionFetcher) {
-    tracing_subscriber::fmt().init();
-    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    #[cfg(feature = "runtime-agnostic")]
-    let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
+  env_logger::init();
 
+  let copilot_handler = copilot::CopilotHandler::new().await;
+  // tracing_subscriber::fmt().init();
 
-    let (service, socket) = LspService::build(|client| Copilot { client, fetcher })
-      .custom_method("getCompletionsCycling", Copilot::get_completions_cycling)
-      .custom_method("getCompletions", Copilot::get_completions_cycling)
-      .custom_method("TextDocument/completions", Copilot::get_completions_cycling)
-      .finish();
-    println!("Listening on stdin/stdout");
-    Server::new(stdin, stdout, socket).serve(service).await;
-  }
+  let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+  #[cfg(feature = "runtime-agnostic")]
+  let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
 
-  let user_token = reader::read_config();
-  let copilot_token = auth::get_copilot_token(&user_token).await.unwrap();
-  let builder = auth::get_request_builder(&copilot_token).unwrap();
-  let fetcher = completions::CompletionFetcher::new(builder);
-  start_server(fetcher).await
+  let (service, socket) = LspService::build(|client| CopilotLSP {client, document_map: DashMap::new(), copilot_handler})
+    .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
+    .finish();
+  Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn get_test_request() -> completions::CompletionRequest {
-  let params = completions::CompletionParams {
-    language: "javascript".to_string(),
-    next_indent: 0,
-    trim_by_indentation: true,
-    prompt_tokens: 19,
-    suffix_tokens: 1
-  };
-
-  completions::CompletionRequest {
-    prompt: "// Path: app/my_file.js\nfunction fetch_tweet() {\nva".to_string(),
-    suffix: "}".to_string(),
-    max_tokens: 500,
-    temperature: 0,
-    top_p: 1,
-    n: 1,
-    stop: ["\n".to_string()].to_vec(),
-    nwo: "my_org/my_repo".to_string(),
-    stream: true,
-    extra: params
-  }
+fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
+  let line = rope.try_char_to_line(offset).ok()?;
+  let first_char_of_line = rope.try_line_to_char(line).ok()?;
+  let column = offset - first_char_of_line;
+  Some(Position::new(line as u32, column as u32))
 }
