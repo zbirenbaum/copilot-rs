@@ -8,7 +8,6 @@ use tower_lsp::lsp_types::*;
 use builder::CopilotRequestBuilder;
 mod receiver;
 use tower_lsp::lsp_types::{CompletionList, CompletionItem};
-
 use self::{receiver::CopilotResponse, builder::CompletionRequest};
 mod builder;
 mod auth;
@@ -54,14 +53,22 @@ pub struct CopilotHandler {
   builder: CopilotRequestBuilder,
 }
 
-fn on_receive_cb (vec: &mut Vec<String>, data: &str) {
+fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
+  let line = rope.try_char_to_line(offset).ok()?;
+  let first_char_of_line = rope.try_line_to_char(line).ok()?;
+  let column = offset - first_char_of_line;
+  Some(Position::new(line as u32, column as u32))
+}
+
+fn position_to_offset(position: Position, rope: &Rope) -> Option<usize> {
+  Some(rope.try_line_to_char(position.line as usize).ok()? + position.character as usize)
+}
+
+fn on_receive_cb (data: &str) -> String {
   let resp: receiver::CopilotResponse = serde_json::from_str(data).unwrap();
-  let v = &resp.choices;
-  for i in v {
-    let item = i.text.to_string();
-    // let item = CompletionItem::new_simple(i.text.to_string(), "".to_string());
-    vec.push(item);
-  }
+  resp.choices.iter().map(|x| {
+    x.text.to_string()
+  }).collect::<Vec<_>>().join("")
 }
 
 impl CopilotHandler {
@@ -73,61 +80,79 @@ impl CopilotHandler {
     Self { builder }
   }
 
-  pub fn completion_params_to_request(&self, language: String, params: CompletionParams, rope: &Rope) -> CompletionRequest {
-    let prefix = (|| {
-      let start_idx = rope.line_to_char(0);
-      let char_pos = rope.line_to_char(params.text_document_position.position.character as usize);
-      let end_idx = rope.line_to_char(params.text_document_position.position.line as usize);
-      return rope.slice(start_idx..end_idx).to_string()
+
+  pub async fn stream_completions(&self, language: String, params: CompletionParams, rope: &Rope, client: &tower_lsp::Client) -> Vec<CompletionItem> {
+    let pos = position_to_offset(params.text_document_position.position, rope).unwrap();
+    let prompt_text = (|| {
+      if pos == 0 { return "".to_string() }
+      return rope.slice(0..pos).to_string()
     })();
+
     let suffix = (|| {
-      let start_char = rope.line_to_char(params.text_document_position.position.character as usize);
-      let start_idx = rope.line_to_char(params.text_document_position.position.line as usize);
       let end_idx = rope.len_chars();
-      return rope.slice(start_idx+start_char..end_idx).to_string()
+      if pos == end_idx { return "".to_string() }
+      return rope.slice(pos..end_idx).to_string()
     })();
     let _params = builder::CompletionParams {
       language,
       next_indent: 0,
       trim_by_indentation: true,
-      prompt_tokens: prefix.len() as i32,
+      prompt_tokens: prompt_text.len() as i32,
       suffix_tokens: suffix.len() as i32
     };
     // let prompt = params.context; // THIS MAY HAVE LANGUAGE
-    let prompt = format!("// Path: {}\n{}", params.text_document_position.text_document.uri, prefix);
+    let prompt = format!("// Path: {}\n{}", params.text_document_position.text_document.uri, prompt_text);
 
-    CompletionRequest {
+    let text_prefix = (|| {
+      let char_offset = params.text_document_position.position.character as usize;
+      if char_offset == 0 { return "".to_string(); }
+      let line_start = pos-char_offset;
+      return rope.slice(line_start..pos).to_string()
+    })();
+
+    let data = CompletionRequest {
       prompt,
       suffix,
       max_tokens: 500,
-      temperature: 0,
-      top_p: 1,
+      temperature: 1.0,
+      top_p: 1.0,
       n: 1,
       stop: ["\n".to_string()].to_vec(),
       nwo: "my_org/my_repo".to_string(),
       stream: true,
       extra: _params
-    }
-  }
-  pub async fn stream_completions(&self, data: CompletionRequest) -> Result<Option<Vec<String>>, ()> {
-    let mut stream = self.builder.build_request(data)
+    };
+    let mut stream = self.builder.build_request(&data)
       .send()
       .await.unwrap()
       .bytes_stream()
       .eventsource();
-    let mut choices: Vec<String> = vec![];
+    let mut responses: Vec<String> = vec![];
     while let Some(event) = stream.next().await{
       match event {
         Ok(event) => {
           if event.data == "[DONE]" { break };
-          on_receive_cb(&mut choices, &event.data);
+          responses.push(on_receive_cb(&event.data));
         },
         Err(e) => println!("error occured: {}", e),
       }
     }
-    println!("choices: {:?}", choices);
+    let result = responses.join("");
+    client.log_message(MessageType::ERROR, &result).await;
+    let prompt = data.prompt.to_string();
+    client.log_message(MessageType::ERROR, &result).await;
+
+    let full = format!("{}{}", text_prefix, result.clone());
+    client.log_message(MessageType::ERROR, &full).await;
+    vec![
+      CompletionItem {
+        label: full,
+        insert_text: Some(result.clone()),
+        kind: Some(CompletionItemKind::TEXT),
+        ..Default::default()
+      }
+    ]
     // let resp = CompletionResponse::Array(completions.completions);
-    Ok(Some(choices))
   }
 }
 

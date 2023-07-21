@@ -58,6 +58,38 @@ impl LanguageServer for CopilotLSP {
       .await;
   }
 
+  async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    let uri = &params.text_document_position.text_document.uri;
+    let position = &params.text_document_position.position;
+    let rope = self.document_map.get(&uri.to_string()).unwrap();
+    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
+    self.client
+      .log_message(MessageType::ERROR, &language)
+      .await;
+
+    let s = format!("{:?}", &params.text_document_position.position.character);
+    println!("{}", s);
+    self.client
+      .log_message(MessageType::ERROR, s)
+      .await;
+
+    let pos = position_to_offset(params.text_document_position.position, &rope);
+    let prefix = (|| {
+      if pos == 0 { return "".to_string() }
+      return rope.slice(0..pos).to_string()
+    })();
+    let suffix = (|| {
+      let end_idx = rope.len_chars();
+      if pos == end_idx { return "".to_string() }
+      return rope.slice(pos..end_idx).to_string()
+    })();
+    let completions = self.copilot_handler.stream_completions(language, params, &rope, &self.client).await;
+    let s = format!("{:?}", completions);
+    self.client.log_message(MessageType::ERROR, &s).await;
+    Ok(Some(CompletionResponse::Array(completions)))
+    // Ok(Some(CompletionResponse::Array([].to_vec())))
+  }
+
   async fn shutdown(&self) -> Result<()> {
     Ok(())
   }
@@ -93,49 +125,6 @@ impl LanguageServer for CopilotLSP {
     self.client
       .log_message(MessageType::INFO, "file closed!")
       .await;
-  }
-  async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-    let uri = &params.text_document_position.text_document.uri;
-    let position = &params.text_document_position.position;
-
-    let rope = self.document_map.get(&uri.to_string()).unwrap();
-    let line = rope.get_line(position.line as usize);
-    let char = rope.try_line_to_char(position.line as usize).ok().unwrap();
-    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    println!("Language: {}", &language);
-    self.client
-      .log_message(MessageType::ERROR, &language)
-      .await;
-
-    self.client.log_message(MessageType::ERROR, &line.unwrap().to_string()).await;
-
-    let offset = char + position.character as usize;
-    let completion_request = self.copilot_handler.completion_params_to_request(language, params, &rope);
-    // let s = format!("{:?}", completion_request);
-    // self.client
-    //   .log_message(MessageType::ERROR, s)
-    //   .await;
-    let items = self.copilot_handler.stream_completions(completion_request).await.unwrap();
-    let mut completions: Vec<CompletionItem> = vec![];
-    match items {
-      Some(items) => {
-        for item in items {
-          completions.push(CompletionItem {
-            label: item.clone(),
-            insert_text: Some(item.clone()),
-            kind: Some(CompletionItemKind::TEXT),
-            detail: Some(item),
-            ..Default::default()
-          });
-        }
-      }
-      None => {
-        self.client
-          .log_message(MessageType::WARNING, "No completions received!")
-          .await;
-        }
-    }
-    Ok(Some(CompletionResponse::Array(completions)))
   }
 
   async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
@@ -212,9 +201,13 @@ async fn main() {
   Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
-  let line = rope.try_char_to_line(offset).ok()?;
-  let first_char_of_line = rope.try_line_to_char(line).ok()?;
+fn position_to_offset(position: Position, rope: &Rope) -> usize {
+  rope.line_to_char(position.line as usize) + position.character as usize
+}
+
+fn offset_to_position(offset: usize, rope: &Rope) -> Position {
+  let line = rope.char_to_line(offset);
+  let first_char_of_line = rope.line_to_char(line);
   let column = offset - first_char_of_line;
-  Some(Position::new(line as u32, column as u32))
+  Position::new(line as u32, column as u32)
 }
