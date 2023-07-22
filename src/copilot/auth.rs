@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use reqwest::RequestBuilder;
+
 use interfaces::Interface;
 use std::process;
 use sha256::digest;

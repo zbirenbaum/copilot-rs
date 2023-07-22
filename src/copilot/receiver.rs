@@ -1,6 +1,6 @@
-use eventsource_stream::EventStream;
-use serde_derive::{Deserialize, Serialize};
-use tower_lsp::lsp_types::{CompletionList, CompletionItem};
+
+use serde_derive::{Deserialize};
+
 
 pub fn object_empty_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where

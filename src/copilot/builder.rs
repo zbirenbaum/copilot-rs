@@ -31,29 +31,6 @@ pub struct CompletionParams {
 pub struct CopilotRequestBuilder { builder: RequestBuilder }
 
 impl CopilotRequestBuilder {
-  pub fn test_request(&self) -> CompletionRequest {
-    let params = CompletionParams {
-      language: "".to_string(),
-      next_indent: 0,
-      trim_by_indentation: true,
-      prompt_tokens: 19,
-      suffix_tokens: 1
-    };
-
-    CompletionRequest {
-      prompt: "// Path: app/my_file.js\nfunction fetch_tweet() {\nva".to_string(),
-      suffix: "}".to_string(),
-      max_tokens: 500,
-      temperature: 0.0,
-      top_p: 1.0,
-      n: 1,
-      stop: ["\n".to_string()].to_vec(),
-      nwo: "my_org/my_repo".to_string(),
-      stream: true,
-      extra: params
-    }
-  }
-
   pub fn build_request(&self, data: &CompletionRequest) -> RequestBuilder {
     let body = serde_json::to_string(&data).unwrap();
     let request_builder = self.builder.try_clone().unwrap();

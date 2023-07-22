@@ -1,13 +1,13 @@
 mod copilot;
-use futures::StreamExt;
-use futures::FutureExt;
-use std::collections::HashMap;
+
+
+
 use dashmap::DashMap;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::notification::Notification;
+
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -56,38 +56,6 @@ impl LanguageServer for CopilotLSP {
     self.client
       .log_message(MessageType::INFO, "initialized!")
       .await;
-  }
-
-  async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-    let uri = &params.text_document_position.text_document.uri;
-    let position = &params.text_document_position.position;
-    let rope = self.document_map.get(&uri.to_string()).unwrap();
-    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    self.client
-      .log_message(MessageType::ERROR, &language)
-      .await;
-
-    let s = format!("{:?}", &params.text_document_position.position.character);
-    println!("{}", s);
-    self.client
-      .log_message(MessageType::ERROR, s)
-      .await;
-
-    let pos = position_to_offset(params.text_document_position.position, &rope);
-    let prefix = (|| {
-      if pos == 0 { return "".to_string() }
-      return rope.slice(0..pos).to_string()
-    })();
-    let suffix = (|| {
-      let end_idx = rope.len_chars();
-      if pos == end_idx { return "".to_string() }
-      return rope.slice(pos..end_idx).to_string()
-    })();
-    let completions = self.copilot_handler.stream_completions(language, params, &rope, &self.client).await;
-    let s = format!("{:?}", completions);
-    self.client.log_message(MessageType::ERROR, &s).await;
-    Ok(Some(CompletionResponse::Array(completions)))
-    // Ok(Some(CompletionResponse::Array([].to_vec())))
   }
 
   async fn shutdown(&self) -> Result<()> {
@@ -180,7 +148,43 @@ impl CopilotLSP {
       .insert(params.uri.to_string(), rope);
   }
   async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-    self.completion(params).await
+    self.client
+      .log_message(MessageType::ERROR, "here")
+      .await;
+    let uri = &params.text_document_position.text_document.uri;
+    let _position = &params.text_document_position.position;
+    let rope = self.document_map.get(&uri.to_string()).unwrap();
+    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
+    self.client
+      .log_message(MessageType::ERROR, &language)
+      .await;
+
+    let s = format!("{:?}", &params.text_document_position.position.character);
+    println!("{}", s);
+    self.client
+      .log_message(MessageType::ERROR, s)
+      .await;
+
+    let pos = position_to_offset(params.text_document_position.position, &rope);
+    let _prefix = (|| {
+      if pos == 0 { return "".to_string() }
+      return rope.slice(0..pos).to_string()
+    })();
+    let _suffix = (|| {
+      let end_idx = rope.len_chars();
+      if pos == end_idx { return "".to_string() }
+      return rope.slice(pos..end_idx).to_string()
+    })();
+    let completions = self.copilot_handler.stream_completions(language, params, &rope, &self.client).await;
+    match completions {
+      Some(completions) => {
+        let _s = format!("{:?}", completions);
+        Ok(Some(CompletionResponse::Array(completions)))
+      }
+      None => {
+        Ok(Some(CompletionResponse::Array(vec![])))
+      }
+    }
   }
 }
 
@@ -203,11 +207,4 @@ async fn main() {
 
 fn position_to_offset(position: Position, rope: &Rope) -> usize {
   rope.line_to_char(position.line as usize) + position.character as usize
-}
-
-fn offset_to_position(offset: usize, rope: &Rope) -> Position {
-  let line = rope.char_to_line(offset);
-  let first_char_of_line = rope.line_to_char(line);
-  let column = offset - first_char_of_line;
-  Position::new(line as u32, column as u32)
 }
