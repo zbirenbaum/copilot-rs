@@ -1,5 +1,3 @@
-
-
 use serde::{Deserialize, Serialize};
 use ropey::Rope;
 use futures_util::StreamExt;
@@ -11,7 +9,6 @@ use tower_lsp::lsp_types::CompletionItem;
 use self::builder::CompletionRequest;
 mod builder;
 mod auth;
-
 
 // mod auth;
 // mod util;
@@ -104,25 +101,24 @@ impl CopilotHandler {
 
   pub async fn stream_completions(&self, language: String, params: CompletionParams, rope: &Rope, client: &tower_lsp::Client) -> Option<Vec<CompletionItem>> {
     let pos = position_to_offset(params.text_document_position.position, rope).unwrap();
-    println!("pos");
+    client.log_message(MessageType::ERROR, "pos").await;
     let prompt = format!(
       "// Path: {}\n{}",
       params.text_document_position.text_document.uri,
       get_prompt(pos, rope)
     );
-    println!("prompt");
+    client.log_message(MessageType::ERROR, "prompt").await;
     let suffix = get_suffix(pos, rope);
-    println!("suffix");
+    client.log_message(MessageType::ERROR, "suffix").await;
     let _params = get_params(&language, &prompt, &suffix);
-    println!("params");
-
+    client.log_message(MessageType::ERROR, "params").await;
     let text_prefix = (|| {
       let char_offset = params.text_document_position.position.character as usize;
       if char_offset == 0 { return "".to_string(); }
       let line_start = pos-char_offset;
       return rope.slice(line_start..pos).to_string()
     })();
-    println!("prefix");
+    client.log_message(MessageType::ERROR, "prefix").await;
     let data = CompletionRequest {
       prompt,
       suffix,
@@ -135,13 +131,21 @@ impl CopilotHandler {
       stream: true,
       extra: _params
     };
-    let request = self.builder.build_request(&data)
-      .send()
-      .await;
-
-    match request {
-      Ok(request) => {
-        let mut stream = request
+    client.log_message(MessageType::ERROR, "data").await;
+    let req = self.builder.build_request(&data).send().await;
+    match req {
+      Ok(req) => {
+        let status = format!("Status: {}", req.status());
+        client.log_message(MessageType::ERROR, status).await;
+        let err = req.error_for_status_ref();
+        match err {
+          Ok(_res) => {},
+          Err(e) => {
+            client.log_message(MessageType::ERROR, e).await;
+          }
+        }
+        client.log_message(MessageType::ERROR, req.status()).await;
+        let mut stream = req
           .bytes_stream()
           .eventsource();
         let mut responses: Vec<String> = vec![];
@@ -151,20 +155,20 @@ impl CopilotHandler {
               if event.data == "[DONE]" { break };
               responses.push(on_receive_cb(&event.data));
             },
-            Err(e) => println!("error occured: {}", e),
+            Err(e) =>{
+              let err_str = format!("{}{:?}", "Request Error: ", &e);
+              client.log_message(MessageType::ERROR, err_str).await;
+            }
           }
         }
         let result = responses.join("");
-        client.log_message(MessageType::ERROR, &result).await;
         let _prompt = data.prompt.to_string();
-        client.log_message(MessageType::ERROR, &result).await;
+        let full = format!("{}{}", text_prefix, result);
 
-        let full = format!("{}{}", text_prefix, result.clone());
-        client.log_message(MessageType::ERROR, &full).await;
         Some(vec![
           CompletionItem {
             label: full,
-            insert_text: Some(result.clone()),
+            insert_text: Some(result),
             kind: Some(CompletionItemKind::TEXT),
             ..Default::default()
           }

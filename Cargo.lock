@@ -244,6 +244,7 @@ dependencies = [
  "interfaces",
  "network-interface",
  "oauth2",
+ "regex 1.9.1",
  "reqwest",
  "reqwest-eventsource",
  "ropey",
