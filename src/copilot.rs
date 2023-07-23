@@ -120,7 +120,7 @@ impl CopilotHandler {
     let data = CompletionRequest {
       prompt,
       suffix,
-      max_tokens: 500,
+      max_tokens: 1000,
       temperature: 1.0,
       top_p: 1.0,
       n: 1,
@@ -170,40 +170,51 @@ impl CopilotHandler {
 
         let _prompt = data.prompt.to_string();
         let res = responses.join("");
-        // let mut full = text_prefix.to_string();
-        // full.push_str(&res.to_string());
-        let prefix_without_space = text_prefix.trim_start().to_string();
-        let num_spaces = text_prefix.len() - prefix_without_space.len();
-        let formatted: Vec<String>;
-        if res.find('\n').is_some() {
-          if num_spaces > 0 {
-            let indent = " ".to_string().repeat(num_spaces);
-            formatted = res.split('\n').map(|x| {
-              x.replacen(&indent, "", 1)
-            }).collect();
-          }
-          else {
-            formatted = res.split('\n').map(|x| x.to_string()).collect()
-          }
-        } else {
-          formatted = vec![res];
-        }
-        // let filter_text = line_splits.join("");
-        let res = responses.join("\n");
-        let insert_text = formatted.join("\n");
-        let label =  format!("{}{}", &prefix_without_space, &insert_text);
-        client.log_message(MessageType::ERROR, res.to_string()).await;
-        let filter_text = format!("{}{}", text_prefix, res);
+        let full = format!("{}{}", text_prefix.to_string(), res);
 
         Some(vec![
           CompletionItem {
-            label,
-            filter_text: Some(filter_text),
-            insert_text: Some(insert_text),
+            label: full.to_string(),
+            filter_text: Some(full),
+            insert_text: Some(res),
             kind: Some(CompletionItemKind::SNIPPET),
             ..Default::default()
           }
         ])
+        // // full.push_str(&res.to_string());
+        // let prefix_without_space = text_prefix.trim_start().to_string();
+        // let num_spaces = text_prefix.len() - prefix_without_space.len();
+        //
+        // let formatted: Vec<String>;
+        // if res.find('\n').is_some() {
+        //   if num_spaces > 0 {
+        //     let indent = " ".to_string().repeat(num_spaces);
+        //     formatted = res.split('\n').map(|x| {
+        //       x.replacen(&indent, "", 1)
+        //     }).collect();
+        //   }
+        //   else {
+        //     formatted = res.split('\n').map(|x| x.to_string()).collect()
+        //   }
+        // } else {
+        //   formatted = vec![res];
+        // }
+        // // let filter_text = line_splits.join("");
+        // let res = responses.join("\n");
+        // let insert_text = res.trim_start().to_string();
+        // let label =  format!("{}{}", &prefix_without_space, &formatted.join("\n"));
+        // client.log_message(MessageType::ERROR, res.to_string()).await;
+        // let filter_text = format!("{}{}", &text_prefix, &res);
+        //
+        // Some(vec![
+        //   CompletionItem {
+        //     label,
+        //     filter_text: Some(filter_text),
+        //     insert_text: Some(insert_text),
+        //     kind: Some(CompletionItemKind::SNIPPET),
+        //     ..Default::default()
+        //   }
+        // ])
         // let resp = CompletionResponse::Array(completions.completions);
       },
       Err(req) => {
