@@ -14,7 +14,6 @@ mod auth;
 // mod util;
 // use serde_json::Value;
 // use serde_derive::{Deserialize, Serialize};
-//
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct TextDocument {
@@ -24,7 +23,6 @@ struct TextDocument {
   version: i16,
 }
 
-//
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct Document {
@@ -116,7 +114,7 @@ impl CopilotHandler {
       let char_offset = params.text_document_position.position.character as usize;
       if char_offset == 0 { return "".to_string(); }
       let line_start = pos-char_offset;
-      return rope.slice(line_start..pos).to_string()
+      rope.slice(line_start..pos).to_string()
     })();
     client.log_message(MessageType::ERROR, "prefix").await;
     let data = CompletionRequest {
@@ -133,6 +131,9 @@ impl CopilotHandler {
     };
     client.log_message(MessageType::ERROR, "data").await;
     let req = self.builder.build_request(&data).send().await;
+    if req.is_err() {
+      client.log_message(MessageType::ERROR, "request error").await;
+    }
     match req {
       Ok(req) => {
         let status = format!("Status: {}", req.status());
@@ -149,10 +150,15 @@ impl CopilotHandler {
           .bytes_stream()
           .eventsource();
         let mut responses: Vec<String> = vec![];
-        while let Some(event) = stream.next().await{
+        while let Some(event) = stream.next().await {
           match event {
             Ok(event) => {
               if event.data == "[DONE]" { break };
+              client.log_message(MessageType::ERROR, &event.data).await;
+              let resp: receiver::CopilotResponse = serde_json::from_str(&event.data).unwrap();
+              resp.choices.iter().map(|x| {
+                x.text.to_string()
+              }).collect::<Vec<_>>().join("");
               responses.push(on_receive_cb(&event.data));
             },
             Err(e) =>{
@@ -161,23 +167,48 @@ impl CopilotHandler {
             }
           }
         }
-        let result = responses.join("");
+
         let _prompt = data.prompt.to_string();
-        let full = format!("{}{}", text_prefix, result);
+        let res = responses.join("");
+        // let mut full = text_prefix.to_string();
+        // full.push_str(&res.to_string());
+        let prefix_without_space = text_prefix.trim_start().to_string();
+        let num_spaces = text_prefix.len() - prefix_without_space.len();
+        let formatted: Vec<String>;
+        if res.find('\n').is_some() {
+          if num_spaces > 0 {
+            let indent = " ".to_string().repeat(num_spaces);
+            formatted = res.split('\n').map(|x| {
+              x.replacen(&indent, "", 1)
+            }).collect();
+          }
+          else {
+            formatted = res.split('\n').map(|x| x.to_string()).collect()
+          }
+        } else {
+          formatted = vec![res];
+        }
+        // let filter_text = line_splits.join("");
+        let res = responses.join("\n");
+        let insert_text = formatted.join("\n");
+        let label =  format!("{}{}", &prefix_without_space, &insert_text);
+        client.log_message(MessageType::ERROR, res.to_string()).await;
+        let filter_text = format!("{}{}", text_prefix, res);
 
         Some(vec![
           CompletionItem {
-            label: full,
-            insert_text: Some(result),
-            kind: Some(CompletionItemKind::TEXT),
+            label,
+            filter_text: Some(filter_text),
+            insert_text: Some(insert_text),
+            kind: Some(CompletionItemKind::SNIPPET),
             ..Default::default()
           }
         ])
         // let resp = CompletionResponse::Array(completions.completions);
       },
-      Err(request) => {
-        println!("{:?}", request);
-        client.log_message(MessageType::ERROR, request).await;
+      Err(req) => {
+        println!("{:?}", req);
+        client.log_message(MessageType::ERROR, req).await;
         None
       }
     }
