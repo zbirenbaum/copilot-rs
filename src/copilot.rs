@@ -1,5 +1,5 @@
 use reqwest::RequestBuilder;
-use serde::{Deserialize, Serialize};
+
 use ropey::Rope;
 use futures_util::StreamExt;
 use eventsource_stream::Eventsource;
@@ -11,7 +11,7 @@ mod auth;
 mod parse;
 use parse::position_to_offset;
 use tokio::time::timeout;
-use tokio::sync::oneshot;
+
 use std::time::Duration;
 // mod auth;
 // mod util;
@@ -48,7 +48,7 @@ impl CopilotHandler {
     client.log_message(MessageType::ERROR, "pos").await;
 
     let prefix = parse::get_text_before(offset, rope).unwrap();
-    let prompt = format!(
+    let _prompt = format!(
       "// Path: {}\n{}",
       params.text_document_position.text_document.uri,
       prefix.to_string()

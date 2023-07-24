@@ -1,11 +1,11 @@
 use serde_derive::{Deserialize, Serialize};
 
 use interfaces::Interface;
-use std::{process, ops::Sub};
+use std::{process};
 use sha256::digest;
 use github_device_flow::authorize;
 use std::fs;
-use chrono::{Utc, DateTime, Duration};
+use chrono::{Utc, DateTime};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CopilotTokenGrant {
