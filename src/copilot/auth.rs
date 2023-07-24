@@ -1,26 +1,48 @@
 use serde_derive::{Deserialize, Serialize};
 
 use interfaces::Interface;
-use std::process;
+use std::{process, ops::Sub};
 use sha256::digest;
 use github_device_flow::authorize;
 use std::fs;
-
+use chrono::{Utc, DateTime, Duration};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CopilotTokenGrant {
   chat_enabled: bool,
   code_quote_enabled: bool,
   copilotignore_enabled: bool,
-  expires_at: i128,
+  expires_at: String,
   public_suggestions: String,
-  refresh_in: f64,
+  refresh_in: String,
   sku: String,
   telemetry: String,
   token: String,
   tracking_id: String
 }
 
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CopilotAuthenticator {
+  token_grant: CopilotTokenGrant,
+  machine_id: String,
+  timestamp: DateTime<Utc>
+}
+
+impl CopilotAuthenticator {
+  pub fn get_token(&self) -> &String { &self.token_grant.token }
+  pub fn get_refresh(&self) -> &String { &self.token_grant.refresh_in }
+
+  pub fn get_machine_id(&self) -> &String { &self.machine_id }
+
+  pub async fn new() -> Self {
+    let user_token = read_config();
+    let token_grant = get_copilot_token(&user_token).await.unwrap();
+    let machine_id = get_machine_id();
+    Self { token_grant, machine_id, timestamp: Utc::now() }
+  }
+
+}
 #[derive(Deserialize, Serialize, Debug)]
 struct HostsFile {
   github_com: UserCredentials,
@@ -51,8 +73,7 @@ pub fn read_config() -> String {
     .replace('.', "_")
   ).unwrap().github_com.oauth_token
 }
-pub async fn get_copilot_token(user_token: &String) -> Result<String, reqwest::Error> {
-  println!("Getting copilot token");
+pub async fn get_copilot_token(user_token: &String) -> Result<CopilotTokenGrant, reqwest::Error> {
   let url = "https://api.github.com/copilot_internal/v2/token".to_string();
   let client: reqwest::Client = reqwest::Client::new();
   let res = client.get(url)
@@ -62,7 +83,7 @@ pub async fn get_copilot_token(user_token: &String) -> Result<String, reqwest::E
     .header("User-Agent", "Rust")
     .send().await?;
   let token_grant = res.json::<CopilotTokenGrant>().await.unwrap();
-  Ok(token_grant.token)
+  Ok(token_grant)
 }
 
 pub fn get_machine_id() -> String {
