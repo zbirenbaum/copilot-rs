@@ -2,6 +2,7 @@ use uuid::Uuid;
 use reqwest::RequestBuilder;
 use chrono::Utc;
 use serde_derive::{Deserialize, Serialize};
+use reqwest::{Result, Response};
 
 use super::auth;
 
@@ -71,7 +72,7 @@ impl CopilotRequestBuilder {
       max_tokens: 500,
       temperature: 1.0,
       top_p: 1.0,
-      n: 1,
+      n: 3,
       stop: ["unset".to_string()].to_vec(),
       nwo: "my_org/my_repo".to_string(),
       stream: true,

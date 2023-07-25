@@ -27,14 +27,14 @@ impl CopilotLSP {
     let _position = &params.text_document_position.position;
     let rope = self.document_map.get(&uri.to_string()).unwrap();
     let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    self.client
-      .log_message(MessageType::ERROR, &language)
-      .await;
+    // self.client
+    //   .log_message(MessageType::ERROR, &language)
+    //   .await;
     let s = format!("{:?}", &params.text_document_position.position.character);
     println!("{}", s);
-    self.client
-      .log_message(MessageType::ERROR, s)
-      .await;
+    // self.client
+    //   .log_message(MessageType::ERROR, s)
+    //   .await;
     let completions = self.copilot_handler.stream_completions(&language, &params, &rope, &self.client).await;
     match completions {
       Ok(complete) => {
@@ -197,9 +197,4 @@ async fn main() {
   let copilot_handler = copilot::CopilotHandler::new().await;
   start_lsp(copilot_handler).await;
   // tracing_subscriber::fmt().init();
-
-}
-
-fn position_to_offset(position: Position, rope: &Rope) -> usize {
-  rope.line_to_char(position.line as usize) + position.character as usize
 }

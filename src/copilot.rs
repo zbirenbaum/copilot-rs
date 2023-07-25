@@ -40,7 +40,7 @@ impl CopilotHandler {
       builder: builder::CopilotRequestBuilder::new().await
     }
   }
-  pub async fn stream_completions(&self, language: &String, params: &CompletionParams, rope: &Rope, client: &tower_lsp::Client) -> Result<Vec<CompletionItem>, String> {
+  pub async fn stream_completions(&self, language: &String, params: &CompletionParams, rope: &Rope, _client: &tower_lsp::Client) -> Result<Vec<CompletionItem>, String> {
     let offset = position_to_offset(params.text_document_position.position, rope).unwrap();
     let prefix = parse::get_text_before(offset, rope).unwrap();
     let _prompt = format!(
@@ -55,10 +55,12 @@ impl CopilotHandler {
     let resp = req.send().await;
     match resp {
       Ok(r) => {
+        _client.log_message(MessageType::ERROR, &r.status()).await;
         let mut stream = r
           .bytes_stream()
           .eventsource();
-        let mut v: Vec<String> = vec![];
+        let mut idx = 0;
+        let mut v: Vec<String> = vec!["".to_string()];
 
         while let Some(e) = stream.next().await {
           let data = e.unwrap().data;
@@ -66,25 +68,27 @@ impl CopilotHandler {
           let copilot_resp_data: CopilotResponse = serde_json::from_str(&data).unwrap();
           let choices = copilot_resp_data.choices.as_slice();
           choices.iter().for_each(|x| {
-            v.push(x.text.to_string())
+            if v.len() <= idx { v.push("".to_string()); }
+            v.get_mut(idx).unwrap().push_str(&x.text.to_string());
+            if x.finish_reason.is_some() { idx += 1; }
           });
         }
-        let s = v.join("");
-        client.log_message(MessageType::ERROR, &s).await;
-
-
-        let preview = format!("{}{}", line_before.trim_start(), s);
-        Ok(vec![
-          CompletionItem {
+        // _client.log_message(MessageType::ERROR, &s).await;
+        let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
+        v.iter().for_each(|s| {
+          let preview = format!("{}{}", line_before.trim_start(), s);
+          completion_list.push(CompletionItem {
             label: preview.to_string(),
             filter_text: Some(preview),
-            insert_text: Some(s),
+            insert_text: Some(s.to_string()),
             kind: Some(CompletionItemKind::TEXT),
             ..Default::default()
-          }
-        ])
+          })
+        });
+        Ok(completion_list)
       },
       Err(e) => {
+        _client.log_message(MessageType::ERROR, e.to_string()).await;
         Err(e.to_string())
       }
     }
