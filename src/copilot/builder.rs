@@ -31,35 +31,30 @@ pub struct CopilotCompletionParams {
 
 #[derive(Debug)]
 pub struct CopilotRequestBuilder {
-  basic_header: RequestBuilder,
   authenticator: auth::CopilotAuthenticator,
 }
 
 impl CopilotRequestBuilder {
   pub async fn new() -> Self {
     let authenticator = auth::CopilotAuthenticator::new().await;
-    let machine_id = &authenticator.get_machine_id().to_string();
+    Self {
+      authenticator,
+    }
+  }
+
+  fn build_request_headers(&self) -> RequestBuilder {
+    let machine_id = self.authenticator.get_machine_id().to_string();
     let completions_url = "https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions";
     let client = reqwest::Client::new();
-    let basic_header = client.post(completions_url)
+    client.post(completions_url)
+      .bearer_auth(self.authenticator.get_token())
       .header("Openai-Organization", "github-copilot")
       .header("VScode-MachineId", machine_id)
       .header("Editor-Version", "JetBrains-IC/231.9011.34")
       .header("Editor-Plugin-Version", "copilot-intellij/1.2.8.2631")
-      .header("OpenAI-Intent", "copilot-ghost");
-    Self {
-      authenticator,
-      basic_header
-    }
-  }
-
-  fn build_request_headers(&self) -> Option<RequestBuilder> {
-    Some(
-      self.basic_header.try_clone().unwrap()
-        .bearer_auth(self.authenticator.get_token())
-        .header("X-Request-Id", Uuid::new_v4().to_string())
-        .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
-    )
+      .header("OpenAI-Intent", "copilot-ghost")
+      .header("X-Request-Id", Uuid::new_v4().to_string())
+      .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
   }
 
   fn build_request_body(&self, language: &String, prompt: &String, suffix: &String) -> Option<CopilotCompletionRequest> {
@@ -73,7 +68,7 @@ impl CopilotRequestBuilder {
     Some(CopilotCompletionRequest {
       prompt: prompt.to_string(),
       suffix: suffix.to_string(),
-      max_tokens: 1000,
+      max_tokens: 500,
       temperature: 1.0,
       top_p: 1.0,
       n: 1,
@@ -89,10 +84,10 @@ impl CopilotRequestBuilder {
     language: &String,
     prompt: &String,
     suffix: &String
-  ) -> Option<RequestBuilder> {
+  ) -> RequestBuilder {
     let builder = self.build_request_headers();
     let data = self.build_request_body(language, prompt, suffix).unwrap();
     let body = serde_json::to_string(&data).unwrap();
-    Some(builder?.body(body))
+    builder.body(body)
   }
 }

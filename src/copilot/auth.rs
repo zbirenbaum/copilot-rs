@@ -12,9 +12,9 @@ pub struct CopilotTokenGrant {
   chat_enabled: bool,
   code_quote_enabled: bool,
   copilotignore_enabled: bool,
-  expires_at: String,
+  expires_at: i128,
   public_suggestions: String,
-  refresh_in: String,
+  refresh_in: i128,
   sku: String,
   telemetry: String,
   token: String,
@@ -31,8 +31,6 @@ pub struct CopilotAuthenticator {
 
 impl CopilotAuthenticator {
   pub fn get_token(&self) -> &String { &self.token_grant.token }
-  pub fn get_refresh(&self) -> &String { &self.token_grant.refresh_in }
-
   pub fn get_machine_id(&self) -> &String { &self.machine_id }
 
   pub async fn new() -> Self {

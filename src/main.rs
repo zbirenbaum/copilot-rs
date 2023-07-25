@@ -1,4 +1,5 @@
 mod copilot;
+use copilot::CopilotHandler;
 use dashmap::DashMap;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
@@ -7,13 +8,64 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
   document_map: DashMap<String, Rope>,
   language_map: DashMap<String, String>,
   copilot_handler: copilot::CopilotHandler
+}
+
+impl CopilotLSP {
+  async fn on_change(&self, params: TextDocumentItem) {
+    let rope = ropey::Rope::from_str(&params.text);
+    self.document_map
+      .insert(params.uri.to_string(), rope);
+  }
+  async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
+    let uri = &params.text_document_position.text_document.uri;
+    let _position = &params.text_document_position.position;
+    let rope = self.document_map.get(&uri.to_string()).unwrap();
+    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
+    self.client
+      .log_message(MessageType::ERROR, &language)
+      .await;
+    let s = format!("{:?}", &params.text_document_position.position.character);
+    println!("{}", s);
+    self.client
+      .log_message(MessageType::ERROR, s)
+      .await;
+    let completions = self.copilot_handler.stream_completions(&language, &params, &rope, &self.client).await;
+    match completions {
+      Ok(complete) => {
+        let _s = format!("{:?}", complete);
+        Ok(Some(CompletionResponse::Array(complete)))
+      },
+      Err(e) => {
+        self.client
+          .log_message(MessageType::ERROR, "No Completions")
+          .await;
+        Err(tower_lsp::jsonrpc::Error {
+          code: tower_lsp::jsonrpc::ErrorCode::ServerError(69),
+          message: e,
+          data: None
+        })
+      }
+    }
+  }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct InlayHintParams {
+  path: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct TextDocumentItem {
+  uri: Url,
+  text: String,
+  version: i32,
 }
 
 #[tower_lsp::async_trait]
@@ -82,36 +134,36 @@ impl LanguageServer for CopilotLSP {
 
   async fn did_save(&self, _: DidSaveTextDocumentParams) {
     self.client
-      .log_message(MessageType::INFO, "file saved!")
+      .log_message(MessageType::ERROR, "file saved!")
       .await;
   }
   async fn did_close(&self, _: DidCloseTextDocumentParams) {
     self.client
-      .log_message(MessageType::INFO, "file closed!")
+      .log_message(MessageType::ERROR, "file closed!")
       .await;
   }
 
   async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
     self.client
-      .log_message(MessageType::INFO, "configuration changed!")
+      .log_message(MessageType::ERROR, "configuration changed!")
       .await;
   }
 
   async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
     self.client
-      .log_message(MessageType::INFO, "workspace folders changed!")
+      .log_message(MessageType::ERROR, "workspace folders changed!")
       .await;
   }
 
   async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
     self.client
-      .log_message(MessageType::INFO, "watched files have changed!")
+      .log_message(MessageType::ERROR, "watched files have changed!")
       .await;
   }
 
   async fn execute_command(&self, _: ExecuteCommandParams) -> Result<Option<Value>> {
     self.client
-      .log_message(MessageType::INFO, "command executed!")
+      .log_message(MessageType::ERROR, "command executed!")
       .await;
 
     match self.client.apply_edit(WorkspaceEdit::default()).await {
@@ -124,81 +176,28 @@ impl LanguageServer for CopilotLSP {
   }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct InlayHintParams {
-  path: String,
-}
+async fn start_lsp<'handler>(copilot_handler: copilot::CopilotHandler) {
+  env_logger::init();
+  let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct TextDocumentItem {
-  uri: Url,
-  text: String,
-  version: i32,
-}
-
-impl CopilotLSP {
-  async fn on_change(&self, params: TextDocumentItem) {
-    let rope = ropey::Rope::from_str(&params.text);
-    self.document_map
-      .insert(params.uri.to_string(), rope);
-  }
-  async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-    self.client
-      .log_message(MessageType::ERROR, "here")
-      .await;
-    let uri = &params.text_document_position.text_document.uri;
-    let _position = &params.text_document_position.position;
-    let rope = self.document_map.get(&uri.to_string()).unwrap();
-    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    self.client
-      .log_message(MessageType::ERROR, &language)
-      .await;
-
-    let s = format!("{:?}", &params.text_document_position.position.character);
-    println!("{}", s);
-    self.client
-      .log_message(MessageType::ERROR, s)
-      .await;
-
-    let pos = position_to_offset(params.text_document_position.position, &rope);
-    let _prefix = (|| {
-      if pos == 0 { return "".to_string() }
-      return rope.slice(0..pos).to_string()
-    })();
-    let _suffix = (|| {
-      let end_idx = rope.len_chars();
-      if pos == end_idx { return "".to_string() }
-      return rope.slice(pos..end_idx).to_string()
-    })();
-    let completions = self.copilot_handler.stream_completions(language, params, &rope, &self.client).await;
-    match completions {
-      Some(completions) => {
-        let _s = format!("{:?}", completions);
-        Ok(Some(CompletionResponse::Array(completions)))
-      }
-      None => {
-        Ok(Some(CompletionResponse::Array(vec![])))
-      }
-    }
-  }
+  let (service, socket) = LspService::build(|client| CopilotLSP {
+    client, document_map: DashMap::new(),
+    language_map: DashMap::new(),
+    copilot_handler
+  })
+  .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
+  .finish();
+  Server::new(stdin, stdout, socket).serve(service).await;
 }
 
 #[tokio::main]
 async fn main() {
-  env_logger::init();
-
-  let copilot_handler = copilot::CopilotHandler::new().await;
-  // tracing_subscriber::fmt().init();
-
-  let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
   #[cfg(feature = "runtime-agnostic")]
   let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
+  let copilot_handler = copilot::CopilotHandler::new().await;
+  start_lsp(copilot_handler).await;
+  // tracing_subscriber::fmt().init();
 
-  let (service, socket) = LspService::build(|client| CopilotLSP {client, document_map: DashMap::new(), language_map: DashMap::new(), copilot_handler})
-    .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
-    .finish();
-  Server::new(stdin, stdout, socket).serve(service).await;
 }
 
 fn position_to_offset(position: Position, rope: &Rope) -> usize {
