@@ -1,7 +1,6 @@
 use serde_derive::{Deserialize, Serialize};
-
 use interfaces::Interface;
-use std::{process};
+use std::process;
 use sha256::digest;
 use github_device_flow::authorize;
 use std::fs;
