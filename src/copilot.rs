@@ -3,18 +3,20 @@ use ropey::Rope;
 use futures_util::StreamExt;
 use eventsource_stream::Eventsource;
 use tower_lsp::lsp_types::*;
-use chrono::Utc;
-use uuid::Uuid;
+use chrono::{Utc, TimeZone};
+use uuid::{Uuid, timestamp, Timestamp};
 use crate::parse::{get_line_before, get_text_after, get_text_before, position_to_offset};
 use crate::auth::CopilotAuthenticator;
 use tokio::time::timeout;
 use std::time::Duration;
 use serde_derive::{Deserialize, Serialize};
+use std::process::exit;
+use tokio::runtime::Handle;
 
 impl CopilotHandler {
   pub fn new(authenticator: CopilotAuthenticator) -> Self {
     Self {
-      authenticator
+      authenticator,
     }
   }
 
@@ -34,8 +36,7 @@ impl CopilotHandler {
   }
 
   fn build_request_body(&self, language: &String, prompt: &String, suffix: &String) -> Option<CopilotCompletionRequest> {
-    let extra = CopilotCompletionParams {
-      language: language.to_string(),
+    let extra = CopilotCompletionParams { language: language.to_string(),
       next_indent: 0,
       trim_by_indentation: true,
       prompt_tokens: prompt.len() as i32,
@@ -67,13 +68,13 @@ impl CopilotHandler {
     builder.body(body)
   }
 
-  pub async fn stream_completions(
+  pub async fn send_request(
     &self,
     language: &String,
     params: &CompletionParams,
     rope: &Rope,
     _client: &tower_lsp::Client
-  ) -> Result<Vec<CompletionItem>, String> {
+  ) -> reqwest::Response {
     let offset = position_to_offset(params.text_document_position.position, rope).unwrap();
     let prefix = get_text_before(offset, rope).unwrap();
     let _prompt = format!(
@@ -83,31 +84,32 @@ impl CopilotHandler {
     );
     let suffix = get_text_after(offset, rope).unwrap();
     let req = self.build_request(language, &prefix, &suffix);
+    req.send().await.unwrap()
+  }
+
+
+  pub async fn fetch_completions(
+    &self,
+    language: &String,
+    params: &CompletionParams,
+    rope: &Rope,
+    _client: &tower_lsp::Client
+  ) -> Result<Vec<CompletionItem>, String> {
+    let resp = self.send_request(language, params, rope, _client).await;
+    let mut idx = 0;
+    let mut v: Vec<String> = vec!["".to_string()];
+    let mut stream = resp
+      .bytes_stream()
+      .eventsource();
+
+    let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
     let line_before = get_line_before(params.text_document_position.position, rope).unwrap();
 
-    let resp = req.send().await;
-    match resp {
-      Ok(r) => {
-        _client.log_message(MessageType::ERROR, &r.status()).await;
-        let mut stream = r
-          .bytes_stream()
-          .eventsource();
-        let mut idx = 0;
-        let mut v: Vec<String> = vec!["".to_string()];
-
-        while let Some(e) = stream.next().await {
-          let data = e.unwrap().data;
-          if data == "[DONE]" { break }
-          let copilot_resp_data: CopilotResponse = serde_json::from_str(&data).unwrap();
-          let choices = copilot_resp_data.choices.as_slice();
-          choices.iter().for_each(|x| {
-            if v.len() <= idx { v.push("".to_string()); }
-            v.get_mut(idx).unwrap().push_str(&x.text.to_string());
-            if x.finish_reason.is_some() { idx += 1; }
-          });
-        }
-        // _client.log_message(MessageType::ERROR, &s).await;
-        let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
+    while let Some(event) = stream.next().await {
+      let e = event.unwrap();
+      let data = e.data;
+      let event_type = e.event;
+      if data.eq("[DONE]") {
         v.iter().for_each(|s| {
           let preview = format!("{}{}", line_before.trim_start(), s);
           completion_list.push(CompletionItem {
@@ -118,13 +120,22 @@ impl CopilotHandler {
             ..Default::default()
           })
         });
-        Ok(completion_list)
-      },
-      Err(e) => {
-        _client.log_message(MessageType::ERROR, e.to_string()).await;
-        Err(e.to_string())
+        break;
+      }
+      let copilot_resp_data: Result<CopilotResponse, serde_json::error::Error> = serde_json::from_str(&data);
+      match copilot_resp_data {
+        Ok(r) => {
+          let choices = r.choices;
+          choices.iter().for_each(|x| {
+            if v.len() <= idx { v.push("".to_string()); }
+            v.get_mut(idx).unwrap().push_str(&x.text.to_string());
+            if x.finish_reason.is_some() { idx += 1; }
+          });
+        },
+        Err(e) => { return Err(e.to_string()); }
       }
     }
+    Ok(completion_list)
   }
 }
 

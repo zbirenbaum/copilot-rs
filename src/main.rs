@@ -1,26 +1,19 @@
-mod copilot;
-use copilot::CopilotHandler;
-mod auth;
-mod parse;
+use copilot_rs::copilot::CopilotHandler;
+use copilot_rs::auth::CopilotAuthenticator;
 use dashmap::DashMap;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::oneshot;
-use tokio::time::timeout;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use std::time::Duration;
-
-type CopilotCompletionReturn = std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error>;
 
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
   document_map: DashMap<String, Rope>,
   language_map: DashMap<String, String>,
-  copilot_handler: copilot::CopilotHandler
+  copilot_handler: CopilotHandler
 }
 
 impl CopilotLSP {
@@ -29,52 +22,25 @@ impl CopilotLSP {
     self.document_map
       .insert(params.uri.to_string(), rope);
   }
-  async fn on_get_completions(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
+
+  async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
     let uri = &params.text_document_position.text_document.uri;
     let _position = &params.text_document_position.position;
     let rope = self.document_map.get(&uri.to_string()).unwrap();
     let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    let s = format!("{:?}", &params.text_document_position.position.character);
-    let completions = self.copilot_handler.stream_completions(&language, &params, &rope, &self.client).await;
-    match completions {
+    // let s = format!("{:?}", &params.text_document_position.position.character);
+    let resp = self.copilot_handler.fetch_completions(&language, &params, &rope, &self.client).await;
+    let s = format!("{:?}", &resp);
+    self.client.log_message(MessageType::ERROR, s).await;
+    match resp {
       Ok(complete) => {
-        let _s = format!("{:?}", complete);
-        self.client.log_message(MessageType::ERROR, _s).await;
         Ok(Some(CompletionResponse::Array(complete)))
-      },
+      }
       Err(e) => {
-        Err(tower_lsp::jsonrpc::Error {
-          code: tower_lsp::jsonrpc::ErrorCode::ServerError(69),
-          message: e,
-          data: None
-        })
+        self.client.log_message(MessageType::ERROR, e).await;
+        Ok(Some(CompletionResponse::Array(vec![])))
       }
     }
-  }
-  async fn get_completions_cycling(&self, params: CompletionParams) -> CopilotCompletionReturn {
-// Wrap the future with a `Timeout` set to expire in 10 milliseconds.
-    let fut = self.on_get_completions(params);
-    if let Ok(res) = timeout(tokio::time::Duration::from_millis(1000), fut).await {
-      if res.is_err(){
-        Err(tower_lsp::jsonrpc::Error {
-            code: tower_lsp::jsonrpc::ErrorCode::ServerError(69),
-            message: "Errored on fetch".to_string(),
-            data: None
-        })
-      }
-      else {
-        Ok(res.unwrap())
-      }
-
-    } else {
-      Err(tower_lsp::jsonrpc::Error {
-          code: tower_lsp::jsonrpc::ErrorCode::ServerError(69),
-          message: "Timeout".to_string(),
-          data: None
-      })
-    }
-
-
   }
 }
 
@@ -151,8 +117,7 @@ impl LanguageServer for CopilotLSP {
       uri: params.text_document.uri,
       text: std::mem::take(&mut params.content_changes[0].text),
       version: params.text_document.version,
-    })
-    .await
+    }).await
   }
 
   async fn did_save(&self, _: DidSaveTextDocumentParams) {
@@ -199,10 +164,12 @@ impl LanguageServer for CopilotLSP {
   }
 }
 
-async fn start_lsp<'handler>(copilot_handler: copilot::CopilotHandler) {
+#[tokio::main]
+async fn main() {
   env_logger::init();
   let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-
+  let authenticator = CopilotAuthenticator::new().await;
+  let copilot_handler = CopilotHandler::new(authenticator);
   let (service, socket) = LspService::build(|client| CopilotLSP {
     client, document_map: DashMap::new(),
     language_map: DashMap::new(),
@@ -211,14 +178,5 @@ async fn start_lsp<'handler>(copilot_handler: copilot::CopilotHandler) {
   .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
   .finish();
   Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-#[tokio::main]
-async fn main() {
-  #[cfg(feature = "runtime-agnostic")]
-  let (stdin, stdout) = (stdin.compat(), stdout.compat_write());
-  let authenticator = auth::CopilotAuthenticator::new().await;
-  let copilot_handler = copilot::CopilotHandler::new(authenticator);
-  start_lsp(copilot_handler).await;
   // tracing_subscriber::fmt().init();
 }
