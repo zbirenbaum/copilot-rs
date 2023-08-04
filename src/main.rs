@@ -7,6 +7,7 @@ use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use copilot_rs::parse;
 
 #[derive(Debug)]
 struct CopilotLSP {
@@ -24,12 +25,25 @@ impl CopilotLSP {
   }
 
   async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-    let uri = &params.text_document_position.text_document.uri;
-    let _position = &params.text_document_position.position;
+    let uri = &params.text_document_position.text_document.uri.clone();
+    let _position = &params.text_document_position.position.clone();
+
     let rope = self.document_map.get(&uri.to_string()).unwrap();
     let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
+    let line_before = parse::get_line_before(params.text_document_position.position, &rope).unwrap().to_string();
+
+    let offset = parse::position_to_offset(params.text_document_position.position, &rope).unwrap();
+    let prefix = parse::get_text_before(offset, &rope).unwrap();
+    let _prompt = format!(
+      "// Path: {}\n{}",
+      params.text_document_position.text_document.uri,
+      prefix.to_string()
+    );
+    let suffix = parse::get_text_after(offset, &rope).unwrap();
+    let req = self.copilot_handler.build_request(&language, &prefix, &suffix);
+    let resp = req.send().await.unwrap();
     // let s = format!("{:?}", &params.text_document_position.position.character);
-    let resp = self.copilot_handler.fetch_completions(&language, &params, &rope, &self.client).await;
+    let resp = self.copilot_handler.fetch_completions(resp, line_before).await;
     let s = format!("{:?}", &resp);
     self.client.log_message(MessageType::ERROR, s).await;
     match resp {

@@ -8,10 +8,10 @@ use uuid::{Uuid, timestamp, Timestamp};
 use crate::parse::{get_line_before, get_text_after, get_text_before, position_to_offset};
 use crate::auth::CopilotAuthenticator;
 use tokio::time::timeout;
-use std::time::Duration;
 use serde_derive::{Deserialize, Serialize};
 use std::process::exit;
 use tokio::runtime::Handle;
+use std::time::{Duration, Instant};
 
 impl CopilotHandler {
   pub fn new(authenticator: CopilotAuthenticator) -> Self {
@@ -68,34 +68,12 @@ impl CopilotHandler {
     builder.body(body)
   }
 
-  pub async fn send_request(
-    &self,
-    language: &String,
-    params: &CompletionParams,
-    rope: &Rope,
-    _client: &tower_lsp::Client
-  ) -> reqwest::Response {
-    let offset = position_to_offset(params.text_document_position.position, rope).unwrap();
-    let prefix = get_text_before(offset, rope).unwrap();
-    let _prompt = format!(
-      "// Path: {}\n{}",
-      params.text_document_position.text_document.uri,
-      prefix.to_string()
-    );
-    let suffix = get_text_after(offset, rope).unwrap();
-    let req = self.build_request(language, &prefix, &suffix);
-    req.send().await.unwrap()
-  }
-
 
   pub async fn fetch_completions(
     &self,
-    language: &String,
-    params: &CompletionParams,
-    rope: &Rope,
-    _client: &tower_lsp::Client
+    resp: reqwest::Response,
+    line_before: String
   ) -> Result<Vec<CompletionItem>, String> {
-    let resp = self.send_request(language, params, rope, _client).await;
     let mut idx = 0;
     let mut v: Vec<String> = vec!["".to_string()];
     let mut stream = resp
@@ -103,9 +81,12 @@ impl CopilotHandler {
       .eventsource();
 
     let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
-    let line_before = get_line_before(params.text_document_position.position, rope).unwrap();
 
+    let timeout = Instant::now();
     while let Some(event) = stream.next().await {
+      if timeout.elapsed().as_millis() >= 1000 {
+        return Err("timeout".to_string());
+      }
       let e = event.unwrap();
       let data = e.data;
       let event_type = e.event;
