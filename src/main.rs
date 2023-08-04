@@ -1,58 +1,107 @@
-use copilot_rs::copilot::CopilotHandler;
-use copilot_rs::auth::CopilotAuthenticator;
+use uuid::Uuid;
+use copilot_rs::{auth, copilot, parse};
+use copilot_rs::copilot::{CopilotCompletionRequest, CopilotCompletionParams};
 use dashmap::DashMap;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use copilot_rs::parse;
+use tower_lsp::jsonrpc::{Error, Result};
+use reqwest::header::{HeaderMap, HeaderValue};
+use chrono::Utc;
+use reqwest::RequestBuilder;
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
+// #[derive(Debug)]
+// struct State {
+//   document_map: Arc<DashMap<String, Rope>>,
+//   language_map: Arc<DashMap<String, String>>,
+//   http_client: Arc<reqwest::Client>,
+// }
+//
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
-  document_map: DashMap<String, Rope>,
-  language_map: DashMap<String, String>,
-  copilot_handler: CopilotHandler
+  // state: Mutex<State>
+  document_map: Arc<DashMap<String, Rope>>,
+  language_map: Arc<DashMap<String, String>>,
+  http_client: Arc<reqwest::Client>,
 }
+type CompletionCyclingResponse = Result<Option<CompletionResponse>>;
 
 impl CopilotLSP {
+  pub fn build_request(
+    &self,
+    language: String,
+    prompt: String,
+    suffix: String
+  ) -> RequestBuilder {
+    let extra = CopilotCompletionParams { language: language.to_string(),
+      next_indent: 0,
+      trim_by_indentation: true,
+      prompt_tokens: prompt.len() as i32,
+      suffix_tokens: suffix.len() as i32
+    };
+    let body = Some(CopilotCompletionRequest {
+      prompt,
+      suffix,
+      max_tokens: 500,
+      temperature: 1.0,
+      top_p: 1.0,
+      n: 3,
+      stop: ["unset".to_string()].to_vec(),
+      nwo: "my_org/my_repo".to_string(),
+      stream: true,
+      extra
+    });
+    let body = serde_json::to_string(&body).unwrap();
+    let completions_url = "https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions";
+    self.http_client.post(completions_url)
+      .header("X-Request-Id", Uuid::new_v4().to_string())
+      .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
+      .body(body)
+  }
+
   async fn on_change(&self, params: TextDocumentItem) {
     let rope = ropey::Rope::from_str(&params.text);
     self.document_map
       .insert(params.uri.to_string(), rope);
   }
 
-  async fn get_completions_cycling(&self, params: CompletionParams) -> std::result::Result<Option<CompletionResponse>, tower_lsp::jsonrpc::Error> {
-    let uri = &params.text_document_position.text_document.uri.clone();
-    let _position = &params.text_document_position.position.clone();
+  async fn get_completions_cycling(&self, params: CompletionParams) -> CompletionCyclingResponse {
+    let uri = params.text_document_position.text_document.uri.to_string();
+    let position = params.text_document_position.position;
+    let rope = self.document_map.get(&uri.to_string()).unwrap().clone();
+    let language = self.language_map.get(&uri.to_string()).unwrap().clone();
+    let doc_params = parse::DocumentCompletionParams::new(uri, position, rope);
 
-    let rope = self.document_map.get(&uri.to_string()).unwrap();
-    let language = self.language_map.get(&uri.to_string()).unwrap().to_string();
-    let line_before = parse::get_line_before(params.text_document_position.position, &rope).unwrap().to_string();
-
-    let offset = parse::position_to_offset(params.text_document_position.position, &rope).unwrap();
-    let prefix = parse::get_text_before(offset, &rope).unwrap();
-    let _prompt = format!(
-      "// Path: {}\n{}",
-      params.text_document_position.text_document.uri,
-      prefix.to_string()
-    );
-    let suffix = parse::get_text_after(offset, &rope).unwrap();
-    let req = self.copilot_handler.build_request(&language, &prefix, &suffix);
+    let req = self.build_request(language, doc_params.prompt, doc_params.suffix);
     let resp = req.send().await.unwrap();
+    let status = resp.status();
+    if status != 200 {
+      self.client.log_message(MessageType::ERROR, status).await;
+      let text = resp.text().await.unwrap();
+      self.client.log_message(MessageType::ERROR, text).await;
+      return Err(Error {
+        code: tower_lsp::jsonrpc::ErrorCode::from(10),
+        data: None,
+        message: format!("http request failed with status: {}",status)
+      })
+    }
     // let s = format!("{:?}", &params.text_document_position.position.character);
-    let resp = self.copilot_handler.fetch_completions(resp, line_before).await;
+    let resp = copilot::fetch_completions(resp, doc_params.line_before).await;
     let s = format!("{:?}", &resp);
     self.client.log_message(MessageType::ERROR, s).await;
     match resp {
-      Ok(complete) => {
-        Ok(Some(CompletionResponse::Array(complete)))
-      }
+      Ok(complete) => { Ok(Some(CompletionResponse::Array(complete))) }
       Err(e) => {
-        self.client.log_message(MessageType::ERROR, e).await;
-        Ok(Some(CompletionResponse::Array(vec![])))
+        Err(Error {
+          code: tower_lsp::jsonrpc::ErrorCode::from(10),
+          data: None,
+          message: format!("completions failed with reason: {}", e)
+        })
       }
     }
   }
@@ -130,7 +179,7 @@ impl LanguageServer for CopilotLSP {
     self.on_change(TextDocumentItem {
       uri: params.text_document.uri,
       text: std::mem::take(&mut params.content_changes[0].text),
-      version: params.text_document.version,
+      version: params.text_document.version
     }).await
   }
 
@@ -182,15 +231,41 @@ impl LanguageServer for CopilotLSP {
 async fn main() {
   env_logger::init();
   let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-  let authenticator = CopilotAuthenticator::new().await;
-  let copilot_handler = CopilotHandler::new(authenticator);
+  // let copilot_handler = CopilotHandler::new();
+
+  let auth_grant = auth::get_copilot_token().await.unwrap();
+  let auth_token = auth_grant.token.to_string();
+
+  let auth_string = format!("Bearer {}", &auth_token.as_str());
+
+  let mut auth_value = HeaderValue::from_str(&auth_string).unwrap();
+  auth_value.set_sensitive(true);
+  let machine_id = auth::get_machine_id();
+
+  let mut header_map = HeaderMap::new();
+  header_map.insert("Authorization", auth_value);
+  header_map.insert("Openai-Organization", HeaderValue::from_static("github-copilot"));
+  header_map.insert("VScode-MachineId", HeaderValue::from_str(&machine_id).unwrap());
+  header_map.insert("Editor-Version", HeaderValue::from_static("JetBrains-IC/231.9011.34"));
+  header_map.insert("Editor-Plugin-Version", HeaderValue::from_static("copilot-intellij/1.2.8.2631"));
+  header_map.insert("OpenAI-Intent", HeaderValue::from_static("copilot-ghost"));
+  header_map.insert("Connection", HeaderValue::from_static("Keep-Alive"));
+  let client_builder = reqwest::Client::builder()
+    .default_headers(header_map);
+  let http_client = client_builder.build().unwrap();
+
+// fn build_request_headers(authenticator: CopilotAuthenticator) -> RequestBuilder {
+// }
+
   let (service, socket) = LspService::build(|client| CopilotLSP {
-    client, document_map: DashMap::new(),
-    language_map: DashMap::new(),
-    copilot_handler
-  })
-  .custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
-  .finish();
-  Server::new(stdin, stdout, socket).serve(service).await;
+    client,
+    document_map: Arc::new(DashMap::new()),
+    language_map: Arc::new(DashMap::new()),
+    http_client: Arc::new(http_client),
+  }).custom_method("getCompletionsCycling", CopilotLSP::get_completions_cycling)
+    .finish();
+  Server::new(stdin, stdout, socket)
+    .serve(service)
+    .await;
   // tracing_subscriber::fmt().init();
 }

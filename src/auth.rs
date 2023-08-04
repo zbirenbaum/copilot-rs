@@ -8,38 +8,19 @@ use chrono::{Utc, DateTime};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CopilotTokenGrant {
-  chat_enabled: bool,
-  code_quote_enabled: bool,
-  copilotignore_enabled: bool,
-  expires_at: i128,
-  public_suggestions: String,
-  refresh_in: i128,
-  sku: String,
-  telemetry: String,
-  token: String,
-  tracking_id: String
+  pub chat_enabled: bool,
+  pub code_quote_enabled: bool,
+  pub copilotignore_enabled: bool,
+  pub expires_at: i128,
+  pub public_suggestions: String,
+  pub refresh_in: i128,
+  pub sku: String,
+  pub telemetry: String,
+  pub token: String,
+  pub tracking_id: String
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CopilotAuthenticator {
-  token_grant: CopilotTokenGrant,
-  machine_id: String,
-  timestamp: DateTime<Utc>
-}
-
-impl CopilotAuthenticator {
-  pub fn get_token(&self) -> &String { &self.token_grant.token }
-  pub fn get_machine_id(&self) -> &String { &self.machine_id }
-
-  pub async fn new() -> Self {
-    let user_token = read_config();
-    let token_grant = get_copilot_token(&user_token).await.unwrap();
-    let machine_id = get_machine_id();
-    Self { token_grant, machine_id, timestamp: Utc::now() }
-  }
-
-}
 #[derive(Deserialize, Serialize, Debug)]
 struct HostsFile {
   github_com: UserCredentials,
@@ -70,7 +51,9 @@ pub fn read_config() -> String {
     .replace('.', "_")
   ).unwrap().github_com.oauth_token
 }
-pub async fn get_copilot_token(user_token: &String) -> Result<CopilotTokenGrant, reqwest::Error> {
+
+pub async fn get_copilot_token() -> Result<CopilotTokenGrant, reqwest::Error> {
+  let user_token = read_config();
   let url = "https://api.github.com/copilot_internal/v2/token".to_string();
   let client: reqwest::Client = reqwest::Client::new();
   let res = client.get(url)

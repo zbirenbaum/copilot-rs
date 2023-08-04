@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 cancellation = "0.1.0"
 chrono = "0.4.26"
+codespan = "0.11.1"
 dashmap = "5.5.0"
 env_logger = "0.10.0"
 eventsource-stream = "0.2.3"
