@@ -14,13 +14,7 @@ use reqwest::RequestBuilder;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
-// #[derive(Debug)]
-// struct State {
-//   document_map: Arc<DashMap<String, Rope>>,
-//   language_map: Arc<DashMap<String, String>>,
-//   http_client: Arc<reqwest::Client>,
-// }
-//
+
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
@@ -171,8 +165,7 @@ impl LanguageServer for CopilotLSP {
       uri: params.text_document.uri,
       text: params.text_document.text,
       version: params.text_document.version,
-    })
-    .await
+    }).await
   }
 
   async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
