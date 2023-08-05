@@ -23,6 +23,7 @@ struct CopilotLSP {
   language_map: Arc<DashMap<String, String>>,
   http_client: Arc<reqwest::Client>,
 }
+
 type CompletionCyclingResponse = Result<Option<CompletionResponse>>;
 
 impl CopilotLSP {
@@ -52,16 +53,11 @@ impl CopilotLSP {
     });
     let body = serde_json::to_string(&body).unwrap();
     let completions_url = "https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions";
-    self.http_client.post(completions_url)
+    let http_client = Arc::clone(&self.http_client);
+    http_client.post(completions_url)
       .header("X-Request-Id", Uuid::new_v4().to_string())
       .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
       .body(body)
-  }
-
-  async fn on_change(&self, params: TextDocumentItem) {
-    let rope = ropey::Rope::from_str(&params.text);
-    self.document_map
-      .insert(params.uri.to_string(), rope);
   }
 
   async fn get_completions_cycling(&self, params: CompletionParams) -> CompletionCyclingResponse {
@@ -76,8 +72,6 @@ impl CopilotLSP {
     let status = resp.status();
     if status != 200 {
       self.client.log_message(MessageType::ERROR, status).await;
-      let text = resp.text().await.unwrap();
-      self.client.log_message(MessageType::ERROR, text).await;
       return Err(Error {
         code: tower_lsp::jsonrpc::ErrorCode::from(10),
         data: None,
@@ -98,6 +92,11 @@ impl CopilotLSP {
         })
       }
     }
+  }
+  async fn on_change(&self, params: TextDocumentItem) {
+    let rope = ropey::Rope::from_str(&params.text);
+    self.document_map
+      .insert(params.uri.to_string(), rope);
   }
 }
 
@@ -246,6 +245,7 @@ async fn main() {
   let client_builder = reqwest::Client::builder()
     .default_headers(header_map);
   let http_client = client_builder.build().unwrap();
+
 
 // fn build_request_headers(authenticator: CopilotAuthenticator) -> RequestBuilder {
 // }
