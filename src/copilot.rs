@@ -12,19 +12,49 @@ use std::process::exit;
 use tokio::runtime::Handle;
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+
+pub struct CopilotCyclingCompletion {
+  display_text: String, // partial text
+  text: String, // fulltext
+  doc_version: i32,
+  range: Range, // start char always 0
+  position: Position,
+}
+
+#[derive(Debug, Serialize)]
+enum CancellationReason { RequestCancelled, }
+impl CancellationReason {
+  fn as_str(&self) -> &'static str { match self { CancellationReason::RequestCancelled => "RequestCancelled" } }
+}
+
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopilotCompletionResponse {
+  completions: Vec<CopilotCyclingCompletion>,
+  cancellation_reason: Option<CancellationReason>,
+}
+
 pub async fn fetch_completions(
   resp: reqwest::Response,
-  line_before: String
-) -> Result<Vec<CompletionItem>, String> {
-  let mut idx = 0;
-  let mut v: Vec<String> = vec!["".to_string()];
+  line_before: String,
+  position: Position,
+  doc_version: i32,
+) -> Result<CopilotCompletionResponse, String> {
   let mut stream = resp
     .bytes_stream()
     .eventsource();
 
-  let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
+  // let mut completion_list: Vec<CompletionItem> = Vec::with_capacity(v.len());
+  let mut v = Vec::<String>::new();
+  v.push("".to_string());
+  let mut completion_list = Vec::<CopilotCyclingCompletion>::new();
 
   let timeout = Instant::now();
+  let mut idx = 0;
+
   while let Some(event) = stream.next().await {
     if timeout.elapsed().as_millis() >= 500 {
       return Err("timeout".to_string());
@@ -34,15 +64,27 @@ pub async fn fetch_completions(
     let event_type = e.event;
     if data.eq("[DONE]") {
       v.iter().for_each(|s| {
-        let preview = format!("{}{}", line_before.to_string().trim_start(), s);
-        let filter = format!("{}{}", line_before.to_string(), s);
-        completion_list.push(CompletionItem {
-          label: preview.to_string(),
-          filter_text: Some(filter),
-          insert_text: Some(s.to_string()),
-          kind: Some(CompletionItemKind::TEXT),
-          ..Default::default()
-        })
+        // let preview = format!("{}{}", line_before.to_string().trim_start(), s);
+        let display_text = s.clone();
+        let text = format!("{}{}", line_before.to_string(), s);
+        let end_char = text.find('\n').unwrap_or(text.len()) as u32;
+        let item = CopilotCyclingCompletion {
+          display_text, // partial text
+          text, // fulltext
+          doc_version,
+          range: Range {
+            start: Position {
+              character: 0,
+              line: position.line,
+            },
+            end: Position {
+              character: end_char,
+              line: position.line,
+            }
+          }, // start char always 0
+          position,
+        };
+        completion_list.push(item);
       });
       break;
     }
@@ -51,15 +93,19 @@ pub async fn fetch_completions(
       Ok(r) => {
         let choices = r.choices;
         choices.iter().for_each(|x| {
-          if v.len() <= idx { v.push("".to_string()); }
-          v.get_mut(idx).unwrap().push_str(&x.text.to_string());
-          if x.finish_reason.is_some() { idx += 1; }
+          match v.get_mut(idx) {
+            Some(val) => {
+              val.push_str(&x.text.to_string());
+              if x.finish_reason.is_some() { idx += 1; }
+            }
+            None => { v.push(x.text.to_string()); }
+          }
         });
       },
       Err(e) => { return Err(e.to_string()); }
     }
   }
-  Ok(completion_list)
+  Ok(CopilotCompletionResponse { cancellation_reason: None, completions: completion_list })
 }
 
 #[derive(Deserialize, Debug)]

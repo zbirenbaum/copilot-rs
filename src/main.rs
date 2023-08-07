@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use copilot_rs::{auth, copilot, parse};
-use copilot_rs::copilot::{CopilotCompletionRequest, CopilotCompletionParams};
+use copilot_rs::copilot::{CopilotCompletionRequest, CopilotCompletionParams, CopilotCompletionResponse};
 use dashmap::DashMap;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use std::sync::Arc;
 struct CopilotLSP {
   client: Client,
   // state: Mutex<State>
-  document_map: Arc<DashMap<String, Rope>>,
+  document_map: Arc<DashMap<String, TextDocumentItem>>,
   language_map: Arc<DashMap<String, String>>,
   http_client: Arc<reqwest::Client>,
 }
@@ -60,11 +60,16 @@ impl CopilotLSP {
       .body(body)
   }
 
-  async fn get_completions_cycling(&self, params: CompletionParams) -> CompletionCyclingResponse {
+  async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
     let uri = params.text_document_position.text_document.uri.to_string();
-    let position = params.text_document_position.position;
-    let rope = self.document_map.get(&uri.to_string()).unwrap().clone();
+    let position = params.text_document_position.position.clone();
+    let text_doc = self.document_map.get(&uri.to_string()).unwrap();
+    let version = text_doc.version.clone();
+    let rope = ropey::Rope::from_str(&text_doc.text.clone());
+    drop(text_doc);
+
     let language = self.language_map.get(&uri.to_string()).unwrap().clone();
+
     let doc_params = parse::DocumentCompletionParams::new(uri, position, rope);
 
     let req = self.build_request(language, doc_params.prompt, doc_params.suffix);
@@ -79,11 +84,11 @@ impl CopilotLSP {
       })
     }
     // let s = format!("{:?}", &params.text_document_position.position.character);
-    let resp = copilot::fetch_completions(resp, doc_params.line_before).await;
+    let resp = copilot::fetch_completions(resp, doc_params.line_before, position, version).await;
     let s = format!("{:?}", &resp);
     self.client.log_message(MessageType::ERROR, s).await;
     match resp {
-      Ok(complete) => { Ok(Some(CompletionResponse::Array(complete))) }
+      Ok(complete) => { Ok(complete) }
       Err(e) => {
         Err(Error {
           code: tower_lsp::jsonrpc::ErrorCode::from(10),
@@ -96,7 +101,7 @@ impl CopilotLSP {
   async fn on_change(&self, params: TextDocumentItem) {
     let rope = ropey::Rope::from_str(&params.text);
     self.document_map
-      .insert(params.uri.to_string(), rope);
+      .insert(params.uri.to_string(), params);
   }
 }
 
