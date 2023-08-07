@@ -26,12 +26,8 @@ pub async fn fetch_completions(
 
   let timeout = Instant::now();
   while let Some(event) = stream.next().await {
-    if timeout.elapsed().as_millis() >= 500 {
-      return Err("timeout".to_string());
-    }
     let e = event.unwrap();
     let data = e.data;
-    let event_type = e.event;
     if data.eq("[DONE]") {
       v.iter().for_each(|s| {
         let preview = format!("{}{}", line_before.to_string().trim_start(), s);

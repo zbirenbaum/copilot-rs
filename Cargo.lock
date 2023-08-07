@@ -282,6 +282,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower-lsp",
+ "tracing",
  "tracing-subscriber",
  "uuid",
 ]

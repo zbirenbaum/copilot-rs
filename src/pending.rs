@@ -6,12 +6,15 @@ use dashmap::{mapref::entry::Entry, DashMap};
 use futures::future::{self, Either};
 use tracing::{debug, info};
 
-use super::ExitedError;
-use crate::jsonrpc::{Error, Id, Response};
+use tower_lsp::ExitedError;
+use tower_lsp::jsonrpc::{Error, Id, Response};
 
 /// A hashmap containing pending server requests, keyed by request ID.
 pub struct Pending(Arc<DashMap<Id, future::AbortHandle>>);
 
+impl Default for Pending {
+  fn default() -> Self { Pending::new() }
+}
 impl Pending {
   /// Creates a new pending server requests map.
   pub fn new() -> Self { Pending(Arc::new(DashMap::new())) }
@@ -24,7 +27,7 @@ impl Pending {
     &self,
     id: Id,
     fut: F,
-    ) -> impl Future<Output = Result<Option<Response>, ExitedError>> + Send + 'static
+  ) -> impl Future<Output = Result<Option<Response>, ExitedError>> + Send + 'static
     where
     F: Future<Output = Result<Option<Response>, ExitedError>> + Send + 'static,
     {

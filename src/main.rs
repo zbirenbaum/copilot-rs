@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use copilot_rs::{auth, copilot, parse};
+use copilot_rs::{auth, copilot, parse, pending};
 use copilot_rs::copilot::{CopilotCompletionRequest, CopilotCompletionParams};
 use dashmap::DashMap;
 use ropey::Rope;
@@ -16,9 +16,14 @@ use std::sync::Arc;
 
 
 #[derive(Debug)]
+struct State {
+  pending: pending::Pending,
+}
+
+#[derive(Debug)]
 struct CopilotLSP {
   client: Client,
-  // state: Mutex<State>
+  state: Mutex<State>,
   document_map: Arc<DashMap<String, Rope>>,
   language_map: Arc<DashMap<String, String>>,
   http_client: Arc<reqwest::Client>,
