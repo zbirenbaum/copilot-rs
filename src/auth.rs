@@ -4,7 +4,7 @@ use std::process;
 use sha256::digest;
 use github_device_flow::authorize;
 use std::fs;
-use chrono::{Utc, DateTime};
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CopilotTokenGrant {
@@ -69,7 +69,7 @@ pub async fn get_copilot_token() -> Result<CopilotTokenGrant, reqwest::Error> {
 pub fn get_machine_id() -> String {
   fn try_get_mac_addr() -> Result<String,()> {
     fn validate_interface(itf: &Interface) -> bool {
-      let exclude = vec!["00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff", "ac:de:48:00:11:22"];
+      let exclude = ["00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff", "ac:de:48:00:11:22"];
       return itf.is_running() &&
         !exclude.iter().any(|&s| s == itf.hardware_addr()
           .unwrap()

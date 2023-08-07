@@ -1,17 +1,14 @@
-use uuid::Uuid;
-use copilot_rs::{auth, copilot, parse};
-use copilot_rs::copilot::{CopilotCompletionRequest, CopilotCompletionParams, CopilotCompletionResponse};
+use copilot_rs::{auth, copilot, parse, request::build_request};
+use copilot_rs::copilot::CopilotCompletionResponse;
 use dashmap::DashMap;
-use ropey::Rope;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tower_lsp::jsonrpc::{Error, Result};
 use reqwest::header::{HeaderMap, HeaderValue};
-use chrono::Utc;
-use reqwest::RequestBuilder;
-use tokio::sync::Mutex;
+
 use std::sync::Arc;
 
 
@@ -24,55 +21,17 @@ struct CopilotLSP {
   http_client: Arc<reqwest::Client>,
 }
 
-type CompletionCyclingResponse = Result<Option<CompletionResponse>>;
-
 impl CopilotLSP {
-  pub fn build_request(
-    &self,
-    language: String,
-    prompt: String,
-    suffix: String
-  ) -> RequestBuilder {
-    let extra = CopilotCompletionParams { language: language.to_string(),
-      next_indent: 0,
-      trim_by_indentation: true,
-      prompt_tokens: prompt.len() as i32,
-      suffix_tokens: suffix.len() as i32
-    };
-    let body = Some(CopilotCompletionRequest {
-      prompt,
-      suffix,
-      max_tokens: 500,
-      temperature: 1.0,
-      top_p: 1.0,
-      n: 3,
-      stop: ["unset".to_string()].to_vec(),
-      nwo: "my_org/my_repo".to_string(),
-      stream: true,
-      extra
-    });
-    let body = serde_json::to_string(&body).unwrap();
-    let completions_url = "https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions";
-    let http_client = Arc::clone(&self.http_client);
-    http_client.post(completions_url)
-      .header("X-Request-Id", Uuid::new_v4().to_string())
-      .header("VScode-SessionId", Uuid::new_v4().to_string() + &Utc::now().timestamp().to_string())
-      .body(body)
-  }
-
   async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
     let uri = params.text_document_position.text_document.uri.to_string();
-    let position = params.text_document_position.position.clone();
+    let position = params.text_document_position.position;
     let text_doc = self.document_map.get(&uri.to_string()).unwrap();
-    let version = text_doc.version.clone();
+    let version = text_doc.version;
     let rope = ropey::Rope::from_str(&text_doc.text.clone());
-    drop(text_doc);
-
     let language = self.language_map.get(&uri.to_string()).unwrap().clone();
-
     let doc_params = parse::DocumentCompletionParams::new(uri, position, rope);
-
-    let req = self.build_request(language, doc_params.prompt, doc_params.suffix);
+    drop(text_doc);
+    let req = build_request(self.http_client.clone(), language, doc_params.prompt, doc_params.suffix);
     let resp = req.send().await.unwrap();
     let status = resp.status();
     if status != 200 {
@@ -99,7 +58,7 @@ impl CopilotLSP {
     }
   }
   async fn on_change(&self, params: TextDocumentItem) {
-    let rope = ropey::Rope::from_str(&params.text);
+    let _rope = ropey::Rope::from_str(&params.text);
     self.document_map
       .insert(params.uri.to_string(), params);
   }

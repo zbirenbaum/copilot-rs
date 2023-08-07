@@ -1,16 +1,8 @@
-use reqwest::RequestBuilder;
-use ropey::Rope;
 use futures_util::StreamExt;
 use eventsource_stream::Eventsource;
 use tower_lsp::lsp_types::*;
-use chrono::{Utc, TimeZone};
-use uuid::{Uuid, timestamp, Timestamp};
-use crate::parse::{get_line_before, get_text_after, get_text_before, position_to_offset};
-use tokio::time::timeout;
 use serde_derive::{Deserialize, Serialize};
-use std::process::exit;
-use tokio::runtime::Handle;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,12 +15,27 @@ pub struct CopilotCyclingCompletion {
   position: Position,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct CopilotResponse {
+  pub id: Option<String>,
+  pub model: String,
+  pub created: u128,
+  pub choices: Vec<Choices>
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Choices {
+  pub text: String,
+  pub index: i16,
+  pub finish_reason: Option<String>,
+  pub logprobs: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 enum CancellationReason { RequestCancelled, }
 impl CancellationReason {
   fn as_str(&self) -> &'static str { match self { CancellationReason::RequestCancelled => "RequestCancelled" } }
 }
-
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,7 +68,7 @@ pub async fn fetch_completions(
     }
     let e = event.unwrap();
     let data = e.data;
-    let event_type = e.event;
+    let _event_type = e.event;
     if data.eq("[DONE]") {
       v.iter().for_each(|s| {
         // let preview = format!("{}{}", line_before.to_string().trim_start(), s);
@@ -107,44 +114,3 @@ pub async fn fetch_completions(
   }
   Ok(CopilotCompletionResponse { cancellation_reason: None, completions: completion_list })
 }
-
-#[derive(Deserialize, Debug)]
-pub struct CopilotResponse {
-  pub id: Option<String>,
-  pub model: String,
-  pub created: u128,
-  pub choices: Vec<Choices>
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Choices {
-  pub text: String,
-  pub index: i16,
-  pub finish_reason: Option<String>,
-  pub logprobs: Option<String>,
-}
-
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CopilotCompletionRequest {
-  pub prompt: String,
-  pub suffix: String,
-  pub max_tokens: i32,
-  pub temperature: f32,
-  pub top_p: f32,
-  pub n: i16,
-  pub stop: Vec<String>,
-  pub nwo: String,
-  pub stream: bool,
-  pub extra: CopilotCompletionParams
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CopilotCompletionParams {
-  pub language: String,
-  pub next_indent: i8,
-  pub trim_by_indentation: bool,
-  pub prompt_tokens: i32,
-  pub suffix_tokens: i32
-}
-
