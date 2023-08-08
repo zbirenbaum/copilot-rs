@@ -1,21 +1,18 @@
 use copilot_rs::{auth, copilot, parse, request::build_request};
-use copilot_rs::copilot::CopilotCompletionResponse;
+use copilot_rs::copilot::{CopilotCompletionResponse, ResponseResult};
 use dashmap::DashMap;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tower_lsp::jsonrpc::{Error, Result};
 use reqwest::header::{HeaderMap, HeaderValue};
-
 use std::sync::Arc;
-
 
 #[derive(Debug)]
 struct CopilotLSP {
   client: Client,
-  // state: Mutex<State>
+  // pending: Arc<DashMap<i32, ResponseResult>>,
   document_map: Arc<DashMap<String, TextDocumentItem>>,
   language_map: Arc<DashMap<String, String>>,
   http_client: Arc<reqwest::Client>,
@@ -43,7 +40,7 @@ impl CopilotLSP {
       })
     }
     // let s = format!("{:?}", &params.text_document_position.position.character);
-    let resp = copilot::fetch_completions(resp, doc_params.line_before, position, version).await;
+    let resp = copilot::fetch_completions(resp, doc_params.line_before, position).await;
     let s = format!("{:?}", &resp);
     self.client.log_message(MessageType::ERROR, s).await;
     match resp {
