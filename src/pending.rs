@@ -4,10 +4,8 @@ use std::future::Future;
 use std::sync::Arc;
 use dashmap::{mapref::entry::Entry, DashMap};
 use futures::future::{self, Either};
-use tracing::{debug, info};
-
-use super::ExitedError;
-use crate::jsonrpc::{Error, Id, Response};
+use tower_lsp::ExitedError;
+use tower_lsp::jsonrpc::{Error, Id, Response};
 
 /// A hashmap containing pending server requests, keyed by request ID.
 pub struct Pending(Arc<DashMap<Id, future::AbortHandle>>);
@@ -55,12 +53,6 @@ impl Pending {
   pub fn cancel(&self, id: &Id) {
     if let Some((_, handle)) = self.0.remove(id) {
       handle.abort();
-      info!("successfully cancelled request with ID: {}", id);
-    } else {
-      debug!(
-        "client asked to cancel request {}, but no such pending request exists, ignoring",
-        id
-        );
     }
   }
 

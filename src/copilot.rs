@@ -4,14 +4,13 @@ use eventsource_stream::{Eventsource, EventStreamError, EventStream};
 use tower_lsp::lsp_types::*;
 use serde_derive::{Deserialize, Serialize};
 use std::time::Instant;
-use cancellation::{CancellationToken, CancellationTokenSource, OperationCanceled};
 use std::sync::Arc;
 
-pub struct ResponseResult {
-  pub ct: CancellationToken,
-  pub result: Option<CopilotCompletionResponse>
-}
-
+// pub struct ResponseResult {
+//   pub ct: CancellationToken,
+//   pub result: Option<CopilotCompletionResponse>
+// }
+//
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopilotCyclingCompletion {

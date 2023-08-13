@@ -1,6 +1,6 @@
 use copilot_rs::{auth, copilot, parse, request::build_request};
 use copilot_rs::pending;
-use copilot_rs::copilot::{CopilotCompletionResponse, CopilotResponse};
+use copilot_rs::copilot::{CopilotCompletionResponse, ResponseResult, CopilotResponse};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,7 +18,6 @@ use tower_lsp::lsp_types::notification::Cancel;
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::str::FromStr;
 use tower_lsp::jsonrpc::{Error, Id, Result, Response};
-use std::borrow::Cow;
 // pub struct ResponseWrapper<V>
 // where
 // for <'a> V: Serialize + Deserialize<'static> + Debug + Clone + Send + Sync + 'static {
@@ -33,8 +32,8 @@ struct Backend {
 }
 
 impl Backend {
-  // async fn on_completions_cycling(&mut self, params: Request) {}
-  async fn get_completions_cycling(&mut self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
+  // async fn on_completions_cycling(&self, params: Request) {}
+  async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
     let uri = params.text_document_position.text_document.uri.to_string();
     let position = params.text_document_position.position;
     let text_doc = self.document_map.get(&uri.to_string()).unwrap();
@@ -47,6 +46,7 @@ impl Backend {
     let resp = req.send().await.unwrap();
     let status = resp.status();
     let resp = copilot::fetch_completions(resp, doc_params.line_before, position).await;
+    self.client.log_message(MessageType::ERROR, s).await;
     self.client.next_request_id();
     match resp {
       Ok(complete) => { Ok(complete) }
@@ -54,13 +54,12 @@ impl Backend {
         Err(Error {
           code: tower_lsp::jsonrpc::ErrorCode::from(10),
           data: None,
-          message: Cow::from(format!("completions failed with reason: {}", e))
+          message: format!("completions failed with reason: {}", e)
         })
       }
     }
   }
-
-  async fn on_change(&mut self, params: TextDocumentItem) {
+  async fn on_change(&self, params: TextDocumentItem) {
     let _rope = ropey::Rope::from_str(&params.text);
     self.document_map
       .insert(params.uri.to_string(), params);
@@ -85,7 +84,7 @@ impl LanguageServer for Backend {
   async fn initialize(&mut self, _: InitializeParams) -> Result<InitializeResult> {
     Ok(InitializeResult {
       server_info: None,
-      offset_encoding: None,
+      // offset_encoding: None,
       capabilities: ServerCapabilities {
         inlay_hint_provider: Some(OneOf::Left(true)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
@@ -112,17 +111,17 @@ impl LanguageServer for Backend {
       },
     })
   }
-  async fn initialized(&mut self, _: InitializedParams) {
+  async fn initialized(&self, _: InitializedParams) {
     self.client
       .log_message(MessageType::INFO, "initialized!")
       .await;
   }
 
-  async fn shutdown(&mut self) -> Result<()> {
+  async fn shutdown(&self) -> Result<()> {
     Ok(())
   }
 
-  async fn did_open(&mut self, params: DidOpenTextDocumentParams) {
+  async fn did_open(&self, params: DidOpenTextDocumentParams) {
     self.client
       .log_message(MessageType::INFO, "file opened!")
       .await;
@@ -134,7 +133,7 @@ impl LanguageServer for Backend {
     }).await
   }
 
-  async fn did_change(&mut self, mut params: DidChangeTextDocumentParams) {
+  async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
     self.on_change(TextDocumentItem {
       uri: params.text_document.uri,
       text: std::mem::take(&mut params.content_changes[0].text),
@@ -142,36 +141,36 @@ impl LanguageServer for Backend {
     }).await
   }
 
-  async fn did_save(&mut self, _: DidSaveTextDocumentParams) {
+  async fn did_save(&self, _: DidSaveTextDocumentParams) {
     self.client
       .log_message(MessageType::ERROR, "file saved!")
       .await;
   }
-  async fn did_close(&mut self, _: DidCloseTextDocumentParams) {
+  async fn did_close(&self, _: DidCloseTextDocumentParams) {
     self.client
       .log_message(MessageType::ERROR, "file closed!")
       .await;
   }
 
-  async fn did_change_configuration(&mut self, _: DidChangeConfigurationParams) {
+  async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
     self.client
       .log_message(MessageType::ERROR, "configuration changed!")
       .await;
   }
 
-  async fn did_change_workspace_folders(&mut self, _: DidChangeWorkspaceFoldersParams) {
+  async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
     self.client
       .log_message(MessageType::ERROR, "workspace folders changed!")
       .await;
   }
 
-  async fn did_change_watched_files(&mut self, _: DidChangeWatchedFilesParams) {
+  async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
     self.client
       .log_message(MessageType::ERROR, "watched files have changed!")
       .await;
   }
 
-  async fn execute_command(&mut self, _: ExecuteCommandParams) -> Result<Option<Value>> {
+  async fn execute_command(&self, _: ExecuteCommandParams) -> Result<Option<Value>> {
     self.client
       .log_message(MessageType::ERROR, "command executed!")
       .await;
