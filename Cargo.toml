@@ -1,5 +1,5 @@
 [package]
-name = "copilot_rs"
+name = "copilot-rs"
 version = "0.19.0"
 edition = "2021"
 rust-version = "1.64.0"

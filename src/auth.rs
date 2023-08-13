@@ -5,7 +5,6 @@ use sha256::digest;
 use github_device_flow::authorize;
 use std::fs;
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CopilotTokenGrant {
   pub chat_enabled: bool,

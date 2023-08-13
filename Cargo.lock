@@ -270,7 +270,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "copilot_rs"
+name = "copilot-rs"
 version = "0.19.0"
 dependencies = [
  "async-codec-lite",

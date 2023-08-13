@@ -6,11 +6,6 @@ use serde_derive::{Deserialize, Serialize};
 use std::time::Instant;
 use std::sync::Arc;
 
-// pub struct ResponseResult {
-//   pub ct: CancellationToken,
-//   pub result: Option<CopilotCompletionResponse>
-// }
-//
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopilotCyclingCompletion {
@@ -97,8 +92,6 @@ pub async fn fetch_completions(
   resp: reqwest::Response,
   line_before: String,
   position: Position,
-  // pending: Arc<DashMap<i32, ResponseResult>>,
-  // ct: CancellationToken
 ) -> Result<CopilotCompletionResponse, String> {
   let mut stream = resp.bytes_stream().eventsource();
   let mut completion_list = Vec::<CopilotCyclingCompletion>::with_capacity(4);
