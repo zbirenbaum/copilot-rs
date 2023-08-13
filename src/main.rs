@@ -1,15 +1,15 @@
-use std::fmt::{self, Debug, Formatter};
-use std::future::Future;
+
+
 use dashmap::DashMap;
-use futures::future::{self, Either};
-use tower_lsp::ExitedError;
-use tower_lsp::jsonrpc::{Request, RequestBuilder};
-use tower_lsp::lsp_types::notification::Cancel;
-use std::sync::atomic::{Ordering, AtomicBool};
+
+
+
+
+
 use std::str::FromStr;
-use tower_lsp::jsonrpc::{Error, Id, Result, Response};
+
 use copilot_rs::{backend::Backend, auth};
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp::{LspService, Server};
 use std::sync::Arc;
 use reqwest::header::{HeaderMap, HeaderValue};
 

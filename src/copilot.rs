@@ -1,10 +1,10 @@
-use dashmap::DashMap;
+
 use futures_util::{StreamExt, FutureExt};
-use eventsource_stream::{Eventsource, EventStreamError, EventStream};
+use eventsource_stream::{Eventsource};
 use tower_lsp::lsp_types::*;
 use serde_derive::{Deserialize, Serialize};
-use std::time::Instant;
-use std::sync::Arc;
+
+
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

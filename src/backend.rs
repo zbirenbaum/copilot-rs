@@ -1,21 +1,21 @@
-use crate::{auth, copilot, parse, request::build_request};
-use crate::copilot::{CopilotCompletionResponse, CopilotResponse};
+use crate::{copilot, parse, request::build_request};
+use crate::copilot::{CopilotCompletionResponse};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::lsp_types::notification::Cancel;
+
 use tower_lsp::lsp_types::*;
-use tower_lsp::jsonrpc::{Request, RequestBuilder, Error, Id, Result, Response};
-use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tower_lsp::ExitedError;
-use std::ops::Deref;
+use tower_lsp::jsonrpc::{Error, Result};
+use tower_lsp::{Client, LanguageServer};
+
+
 use std::sync::Arc;
 use std::borrow::Cow;
-use std::fmt::{self, Debug, Formatter};
-use std::future::Future;
-use std::sync::atomic::{Ordering, AtomicBool};
+use std::fmt::{Debug};
+
+
 use std::str::FromStr;
-use futures::future::{self, Either};
+
 
 #[derive(Debug)]
 pub struct Backend {
@@ -39,14 +39,14 @@ impl Backend {
     let uri = params.text_document_position.text_document.uri.to_string();
     let position = params.text_document_position.position;
     let text_doc = self.document_map.get(&uri.to_string()).unwrap();
-    let version = text_doc.version;
+    let _version = text_doc.version;
     let rope = ropey::Rope::from_str(&text_doc.text.clone());
     let language = self.language_map.get(&uri.to_string()).unwrap().clone();
     let doc_params = parse::DocumentCompletionParams::new(uri, position, rope);
     drop(text_doc);
     let req = build_request(self.http_client.clone(), language, doc_params.prompt, doc_params.suffix);
     let resp = req.send().await.unwrap();
-    let status = resp.status();
+    let _status = resp.status();
     let resp = copilot::fetch_completions(resp, doc_params.line_before, position).await;
     self.client.next_request_id();
     match resp {
