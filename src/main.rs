@@ -1,13 +1,5 @@
-
-
 use dashmap::DashMap;
-
-
-
-
-
 use std::str::FromStr;
-
 use copilot_rs::{backend::Backend, auth};
 use tower_lsp::{LspService, Server};
 use std::sync::Arc;

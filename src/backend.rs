@@ -3,19 +3,13 @@ use crate::copilot::{CopilotCompletionResponse};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
 use tower_lsp::lsp_types::*;
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{Client, LanguageServer};
-
-
 use std::sync::Arc;
 use std::borrow::Cow;
 use std::fmt::{Debug};
-
-
 use std::str::FromStr;
-
 
 #[derive(Debug)]
 pub struct Backend {
