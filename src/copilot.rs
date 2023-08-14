@@ -3,16 +3,16 @@ use eventsource_stream::{Eventsource};
 use tower_lsp::lsp_types::*;
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CopilotCyclingCompletion {
-  display_text: String, // partial text
-  text: String, // fulltext
-  range: Range, // start char always 0
-  position: Position,
+  pub display_text: String, // partial text
+  pub text: String, // fulltext
+  pub range: Range, // start char always 0
+  pub position: Position,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CopilotAnswer {
   pub id: Option<String>,
   pub model: String,
@@ -20,14 +20,14 @@ pub struct CopilotAnswer {
   pub choices: Vec<Choices>
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum CopilotResponse {
   Answer(CopilotAnswer),
   Done,
   Error(String)
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Choices {
   pub text: String,
   pub index: i16,
@@ -43,10 +43,10 @@ pub async fn on_cancel() -> CopilotCompletionResponse {
 }
 
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CopilotCompletionResponse {
-  completions: Vec<CopilotCyclingCompletion>,
-  cancellation_reason: Option<String>,
+  pub completions: Vec<CopilotCyclingCompletion>,
+  pub cancellation_reason: Option<String>,
 }
 
 fn handle_event(

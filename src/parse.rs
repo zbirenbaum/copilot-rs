@@ -35,7 +35,6 @@ pub fn get_line_before(pos: Position, rope: &Rope) -> Option<String> {
   Some(rope.slice(line_start..offset).to_string())
 }
 
-
 pub struct DocumentCompletionParams {
   pub prefix: String,
   pub prompt: String,

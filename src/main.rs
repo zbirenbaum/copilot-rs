@@ -1,9 +1,11 @@
 use dashmap::DashMap;
+use std::{sync::{Arc, atomic::{Ordering, AtomicBool, AtomicU16}, RwLock}, collections::HashMap};
 use std::str::FromStr;
 use copilot_rs::{backend::Backend, auth};
 use tower_lsp::{LspService, Server};
-use std::sync::Arc;
 use reqwest::header::{HeaderMap, HeaderValue};
+use tower::{Layer, Service};
+use std::sync::{Mutex, Condvar};
 
 #[tokio::main]
 async fn main() {
@@ -41,9 +43,12 @@ async fn main() {
 
   let (service, socket) = LspService::build(|client| Backend {
     client,
-    document_map: Arc::new(DashMap::new()),
-    language_map: Arc::new(DashMap::new()),
+    documents: Arc::new(RwLock::new(HashMap::new())),
     http_client: Arc::new(http_client),
+    pending: Arc::new(AtomicBool::new(true)),
+    current_dispatch: None,
+    started: Arc::new((Mutex::new(0), Condvar::new())),
+    finished: Arc::new((Mutex::new(0), Condvar::new()))
   }).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
     .finish();
   Server::new(stdin, stdout, socket)
