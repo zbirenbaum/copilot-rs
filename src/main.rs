@@ -1,7 +1,5 @@
 use dashmap::DashMap;
-use copilot_rs::timeout;
 use std::{sync::{Arc, atomic::{Ordering, AtomicBool, AtomicU16}, RwLock}, collections::HashMap};
-use std::str::FromStr;
 use copilot_rs::{backend::Backend, auth};
 use tower_lsp::{LspService, Server};
 use reqwest::{header::{HeaderMap, HeaderValue}, ClientBuilder};
