@@ -19,7 +19,6 @@ pub struct CopilotTokenGrant {
   pub tracking_id: String
 }
 
-
 #[derive(Deserialize, Serialize, Debug)]
 struct HostsFile {
   github_com: UserCredentials,

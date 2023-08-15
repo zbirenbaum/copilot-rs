@@ -30,7 +30,7 @@ use futures::future::{Abortable, AbortHandle, Aborted};
 use tokio::time;
 use futures_util::{StreamExt, FutureExt};
 use eventsource_stream::{Eventsource};
-use futures::{future, task::Poll};
+use futures::{future, task::{Poll}};
 
 type Handle = tokio::task::JoinHandle<Result<CopilotCompletionResponse>>;
 type ProtectedPair = (Mutex<u32>, Condvar);
@@ -112,6 +112,7 @@ pub async fn await_stream(req: RequestBuilder, line_before: String, pos: Positio
   let mut cancellation_reason = None;
 
   while let Some(event) = stream.next().await {
+    async_std::task::yield_now();
     match handle_event(event.unwrap()) {
       CopilotResponse::Answer(ans) => {
         ans.choices.iter().for_each(|x| {
