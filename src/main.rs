@@ -1,9 +1,10 @@
 use dashmap::DashMap;
+use copilot_rs::timeout;
 use std::{sync::{Arc, atomic::{Ordering, AtomicBool, AtomicU16}, RwLock}, collections::HashMap};
 use std::str::FromStr;
 use copilot_rs::{backend::Backend, auth};
 use tower_lsp::{LspService, Server};
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::{header::{HeaderMap, HeaderValue}, ClientBuilder};
 use tower::{Layer, Service};
 use std::sync::{Mutex, Condvar};
 
@@ -38,18 +39,14 @@ async fn main() {
   let http_client = client_builder.build().unwrap();
 
 
-// fn build_request_headers(authenticator: CopilotAuthenticator) -> RequestBuilder {
-// }
-
-  let (service, socket) = LspService::build(|client| Backend {
+  let (service, socket) = LspService::build(|client|
+   Backend {
     client,
     documents: Arc::new(RwLock::new(HashMap::new())),
     http_client: Arc::new(http_client),
-    pending: Arc::new(AtomicBool::new(true)),
     current_dispatch: None,
-    started: Arc::new((Mutex::new(0), Condvar::new())),
-    finished: Arc::new((Mutex::new(0), Condvar::new()))
-  }).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
+    }
+  ).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
     .finish();
   Server::new(stdin, stdout, socket)
     .serve(service)

@@ -1,6 +1,7 @@
 use crate::parse::DocumentCompletionParams;
 use crate::{copilot, parse, request::build_request};
 use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion};
+use async_std::task::yield_now;
 use futures_util::stream::PollNext;
 use ropey::Rope;
 use reqwest::RequestBuilder;
@@ -32,9 +33,6 @@ use futures_util::{StreamExt, FutureExt};
 use eventsource_stream::{Eventsource};
 use futures::{future, task::{Poll}};
 
-type Handle = tokio::task::JoinHandle<Result<CopilotCompletionResponse>>;
-type ProtectedPair = (Mutex<u32>, Condvar);
-
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 #[derive(Clone)]
@@ -53,9 +51,6 @@ pub struct Backend {
   pub documents: SafeMap,
   pub http_client: Arc<reqwest::Client>,
   pub current_dispatch: Option<AbortHandle>,
-  pub pending: Arc<AtomicBool>,
-  pub started: Arc<ProtectedPair>,
-  pub finished: Arc<ProtectedPair>,
 }
 
 fn handle_event(
@@ -69,30 +64,6 @@ fn handle_event(
     Err(e) => { CopilotResponse::Error(e.to_string()) }
   }
 }
-fn create_item(
-  text: String,
-  line_before: &String,
-  position: Position
-) -> CopilotCyclingCompletion {
-  let display_text = text.clone();
-  let text = format!("{}{}", line_before, text);
-  let end_char = text.find('\n').unwrap_or(text.len()) as u32;
-  CopilotCyclingCompletion {
-    display_text, // partial text
-    text, // fulltext
-    range: Range {
-      start: Position {
-        character: 0,
-        line: position.line,
-      },
-      end: Position {
-        character: position.character,
-        line: position.line,
-      }
-    }, // start char always 0
-    position,
-  }
-}
 
 struct DocParams {
   rope: Rope,
@@ -103,23 +74,20 @@ struct DocParams {
   suffix: String
 }
 
-pub async fn await_stream(req: RequestBuilder, line_before: String, pos: Position) -> Vec<CopilotCyclingCompletion> {
+pub async fn await_stream(req: RequestBuilder, line_before: String, pos: Position) -> Vec<String> {
   let resp = req.send().await.unwrap();
-
   let mut stream = resp.bytes_stream().eventsource();
-  let mut completion_list = Vec::<CopilotCyclingCompletion>::with_capacity(4);
+  let mut completion_list = Vec::<String>::with_capacity(4);
   let mut s = "".to_string();
   let mut cancellation_reason = None;
 
   while let Some(event) = stream.next().await {
-    async_std::task::yield_now();
     match handle_event(event.unwrap()) {
       CopilotResponse::Answer(ans) => {
         ans.choices.iter().for_each(|x| {
           s.push_str(&x.text);
           if x.finish_reason.is_some() {
-            let item = create_item(s.clone(), &line_before, pos);
-            completion_list.push(item);
+            completion_list.push(s.to_string());
             s = "".to_string();
           }
         });
@@ -135,10 +103,16 @@ pub async fn await_stream(req: RequestBuilder, line_before: String, pos: Positio
   return completion_list;
 }
 
+struct CompletionStreamingParams {
+  req: RequestBuilder,
+  line_before: String,
+  position: Position
+}
+
 impl Backend {
   fn get_doc_info(&self, uri: &String) -> Result<Box<TextDocumentItem>> {
     let data = Arc::clone(&self.documents);
-    let map = data.read().expect("RwLock poisoned");
+    let map = data.read().unwrap();
     match map.get(uri) {
       Some(e) => {
         let element = e.lock().expect("RwLock poisoned");
@@ -153,81 +127,40 @@ impl Backend {
       }
     }
   }
-  fn get_doc_params(&self, uri: &String, pos: Position) -> Result<DocParams> {
-    let doc = self.get_doc_info(uri)?;
+
+  pub async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
+    let pos = params.text_document_position.position.clone();
+    let uri = params.text_document_position.text_document.uri.to_string();
+    let doc = self.get_doc_info(&uri).unwrap();
     let rope = ropey::Rope::from_str(&doc.text);
     let offset = parse::position_to_offset(pos, &rope).unwrap();
 
-    Ok(DocParams {
+    let doc_params = DocParams {
       uri: uri.to_string(),
       language: doc.language_id.to_string(),
       prefix: parse::get_text_before(offset, &rope).unwrap(),
       suffix: parse::get_text_after(offset, &rope).unwrap(),
       line_before: parse::get_line_before(pos, &rope).unwrap().to_string(),
       rope,
-    })
-  }
+    };
+    drop(doc);
 
-  fn get_completions_cycling_request(&self, params: DocParams) -> Result<reqwest::RequestBuilder> {
+    let line_before = doc_params.line_before.to_string();
     let http_client = Arc::clone(&self.http_client);
     let _prompt = format!(
       "// Path: {}\n{}",
-      params.uri,
-      params.prefix.to_string()
+      doc_params.uri,
+      doc_params.prefix.to_string()
     );
-    Ok(build_request(http_client, params.language, params.prefix, params.suffix))
+    let req = build_request(http_client, doc_params.language, doc_params.prefix, doc_params.suffix);
+    let completion_list = await_stream(req, line_before.to_string(), params.text_document_position.position.clone());
+    Ok(CopilotCompletionResponse::from_str_vec(completion_list.await, line_before, pos))
   }
-  // async fn on_completions_cycling(&mut self, params: Request) {}
-  pub async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
-    let pos = params.text_document_position.position.clone();
-    let uri = params.text_document_position.text_document.uri.to_string();
-    let doc_params = self.get_doc_params(&uri, pos)?;
-    let line_before = doc_params.line_before.to_string();
-    let rope = doc_params.rope.clone();
-    let req = self.get_completions_cycling_request(doc_params)?;
-    let completion_list = await_stream(req, line_before, params.text_document_position.position.clone()).await.clone();
-    // self.client.log_message(MessageType::ERROR, completions.get(0).unwrap().text.to_string()).await;
-    Ok(CopilotCompletionResponse {
-      cancellation_reason: None,
-      completions: completion_list
-    })
-  }
-  //   let pair2 = Arc::clone(&self.pair);
-  //
-  //   self.pending.store(false, Ordering::Release);
-  //
-  //   let pending = Arc::clone(&self.pending);
-  //   let handle = tokio::task::spawn(async move {
-  //     if !pending.load(Ordering::Acquire) {
-  //     }
-  //     time::sleep(Duration::from_millis(10)).await;
-  //     return on_completions_cycling(
-  //       req,
-  //       position,
-  //       doc_params.line_before
-  //     ).await;
-  //   });
-  //   self.pending.store(true, Ordering::Release);
-  //
-  //   match handle.await {
-  //     Ok(res) => { return res }
-  //     Err(_) => {
-  //       self.client.log_message(MessageType::ERROR, "ABORTED".to_string()).await;
-  //       return Ok(CopilotCompletionResponse {
-  //         completions: vec![],
-  //         cancellation_reason: Some("RequestCancelled".to_string()),
-  //       })
-  //     }
-  //   }
-  // }
-
-  // pub async fn on_change(&self, id: Url, params: TextDocumentItem) {
 }
-// self.document_map.insert(params.uri.to_string(), params);
 
-#[tower_lsp::async_trait(?Send)]
+#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-  async fn initialize(&mut self, _: InitializeParams) -> Result<InitializeResult> {
+  async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
     Ok(InitializeResult {
       server_info: None,
       offset_encoding: None,
@@ -257,17 +190,17 @@ impl LanguageServer for Backend {
       },
     })
   }
-  async fn initialized(&mut self, _: InitializedParams) {
+  async fn initialized(&self, _: InitializedParams) {
     self.client
       .log_message(MessageType::INFO, "initialized!")
       .await;
   }
 
-  async fn shutdown(&mut self) -> Result<()> {
+  async fn shutdown(&self) -> Result<()> {
     Ok(())
   }
 
-  async fn did_open(&mut self, params: DidOpenTextDocumentParams) {
+  async fn did_open(&self, params: DidOpenTextDocumentParams) {
     self.client.log_message(MessageType::INFO, "file opened!").await;
     let id = params.text_document.uri.to_string();
     let doc = Mutex::new(TextDocumentItem {
@@ -280,7 +213,7 @@ impl LanguageServer for Backend {
     map.entry(id).or_insert_with(|| doc);
   }
 
-  async fn did_change(&mut self, mut params: DidChangeTextDocumentParams) {
+  async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
     let data = Arc::clone(&self.documents);
     let mut map = data.write().expect("RwLock poisoned");
     if let Some(element) = map.get(&params.text_document.uri.to_string()) {
@@ -295,36 +228,36 @@ impl LanguageServer for Backend {
     }
   }
 
-  async fn did_save(&mut self, _: DidSaveTextDocumentParams) {
+  async fn did_save(&self, _: DidSaveTextDocumentParams) {
     self.client
       .log_message(MessageType::ERROR, "file saved!")
       .await;
   }
-  async fn did_close(&mut self, _: DidCloseTextDocumentParams) {
+  async fn did_close(&self, _: DidCloseTextDocumentParams) {
     self.client
       .log_message(MessageType::ERROR, "file closed!")
       .await;
   }
 
-  async fn did_change_configuration(&mut self, _: DidChangeConfigurationParams) {
+  async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
     self.client
       .log_message(MessageType::ERROR, "configuration changed!")
       .await;
   }
 
-  async fn did_change_workspace_folders(&mut self, _: DidChangeWorkspaceFoldersParams) {
+  async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
     self.client
       .log_message(MessageType::ERROR, "workspace folders changed!")
       .await;
   }
 
-  async fn did_change_watched_files(&mut self, _: DidChangeWatchedFilesParams) {
+  async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
     self.client
       .log_message(MessageType::ERROR, "watched files have changed!")
       .await;
   }
 
-  async fn execute_command(&mut self, _: ExecuteCommandParams) -> Result<Option<Value>> {
+  async fn execute_command(&self, _: ExecuteCommandParams) -> Result<Option<Value>> {
     self.client
       .log_message(MessageType::ERROR, "command executed!")
       .await;

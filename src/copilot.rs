@@ -42,11 +42,19 @@ pub async fn on_cancel() -> CopilotCompletionResponse {
   }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CopilotCompletionResponse {
   pub completions: Vec<CopilotCyclingCompletion>,
   pub cancellation_reason: Option<String>,
+}
+
+impl CopilotCompletionResponse {
+  pub fn from_str_vec(str_vec: Vec<String>, line_before: String, pos: Position) -> Self {
+    let completions = str_vec.iter().map(|x| {
+      return CopilotCyclingCompletion::new(x.to_string(), line_before.to_string(), pos.clone());
+    }).collect();
+    Self { completions, cancellation_reason: None }
+  }
 }
 
 fn handle_event(
@@ -58,6 +66,23 @@ fn handle_event(
   match serde_json::from_str(&event.data) {
     Ok(data) => { CopilotResponse::Answer(data) }
     Err(e) => { CopilotResponse::Error(e.to_string()) }
+  }
+}
+
+impl CopilotCyclingCompletion {
+  pub fn new(text: String, line_before: String, position: Position) -> Self {
+    let display_text = text.clone();
+    let text = format!("{}{}", line_before, text);
+    let end_char = text.find('\n').unwrap_or(text.len()) as u32;
+    Self {
+      display_text, // partial text
+      text, // fulltext
+      range: Range {
+        start: Position { character: 0, line: position.line },
+        end: Position { character: end_char, line: position.line }
+      }, // start char always 0
+      position,
+    }
   }
 }
 fn create_item(

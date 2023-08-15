@@ -26,7 +26,7 @@ lsp-types = "0.94"
 memchr = "2.5"
 # tokio = { version = "1.17", features = ["full"] }
 # tokio-util = { version = "0.7", optional = true, features = ["codec", "compat"] }
-tower-lsp-macros = { version = "0.8", path = "./tower-lsp/tower-lsp-macros" }
+tower-lsp-macros = { version = "0.9", path = "./tower-lsp/tower-lsp-macros" }
 tower = { version = "0.4", default-features = false, features = ["util"] }
 tracing = "0.1"
 tower-lsp = { path= "./tower-lsp", features = ["proposed"] }

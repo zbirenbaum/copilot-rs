@@ -207,7 +207,21 @@ dependencies = [
  "log",
  "pin-project-lite",
  "tokio",
- "tungstenite",
+ "tungstenite 0.17.3",
+]
+
+[[package]]
+name = "async-tungstenite"
+version = "0.22.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce01ac37fdc85f10a43c43bc582cbd566720357011578a935761075f898baf58"
+dependencies = [
+ "futures-io",
+ "futures-util",
+ "log",
+ "pin-project-lite",
+ "tokio",
+ "tungstenite 0.19.0",
 ]
 
 [[package]]
@@ -432,7 +446,7 @@ dependencies = [
  "async-codec-lite",
  "async-std",
  "async-trait",
- "async-tungstenite",
+ "async-tungstenite 0.18.0",
  "async-weighted-semaphore",
  "auto_impl",
  "bytes",
@@ -462,7 +476,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "ws_stream_tungstenite",
+ "ws_stream_tungstenite 0.9.0",
 ]
 
 [[package]]
@@ -521,6 +535,12 @@ dependencies = [
  "once_cell",
  "parking_lot_core",
 ]
+
+[[package]]
+name = "data-encoding"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2e66c9d817f1720209181c316d28635c050fa304f9c79e47a520882661b7308"
 
 [[package]]
 name = "digest"
@@ -1766,6 +1786,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f04293dc80c3993519f2d7f6f511707ee7094fe0c6d3406feb330cdb3540eba3"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2047,12 +2078,11 @@ checksum = "c20c8dbed6283a09604c3e69b4b7eeb54e298b8a600d4d5ecb5ad39de609f1d0"
 
 [[package]]
 name = "tower-lsp"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "async-codec-lite",
  "async-trait",
- "async-tungstenite",
- "async-weighted-semaphore",
+ "async-tungstenite 0.22.2",
  "auto_impl",
  "bytes",
  "dashmap",
@@ -2068,16 +2098,16 @@ dependencies = [
  "tower-lsp-macros",
  "tracing",
  "tracing-subscriber",
- "ws_stream_tungstenite",
+ "ws_stream_tungstenite 0.10.0",
 ]
 
 [[package]]
 name = "tower-lsp-macros"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.25",
 ]
 
 [[package]]
@@ -2164,6 +2194,25 @@ dependencies = [
  "log",
  "rand",
  "sha-1",
+ "thiserror",
+ "url",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15fba1a6d6bb030745759a9a2a588bfe8490fc8b4751a277db3a0be1c9ebbf67"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand",
+ "sha1",
  "thiserror",
  "url",
  "utf-8",
@@ -2503,7 +2552,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0a636afca48c5e2623aa229cfad7117ab6e23f26f1146e019b9a355744c02b"
 dependencies = [
- "async-tungstenite",
+ "async-tungstenite 0.18.0",
  "async_io_stream",
  "bitflags 1.3.2",
  "futures-core",
@@ -2514,5 +2563,25 @@ dependencies = [
  "pharos",
  "rustc_version",
  "tokio",
- "tungstenite",
+ "tungstenite 0.17.3",
+]
+
+[[package]]
+name = "ws_stream_tungstenite"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b6e7a5ba9436eb3868b052be83377dc685fad6d2f4cddaa2a2251b673472071"
+dependencies = [
+ "async-tungstenite 0.22.2",
+ "async_io_stream",
+ "bitflags 2.4.0",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-util",
+ "log",
+ "pharos",
+ "rustc_version",
+ "tokio",
+ "tungstenite 0.19.0",
 ]
