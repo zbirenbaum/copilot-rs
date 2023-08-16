@@ -1,10 +1,9 @@
-
 use std::{sync::{Arc, RwLock}, collections::HashMap};
 use copilot_rs::{backend::Backend, auth};
 use tower_lsp::{LspService, Server, jsonrpc::router::Router, ExitedError};
 use reqwest::{header::{HeaderMap, HeaderValue}};
 use tower_lsp::jsonrpc::router;
-
+use copilot_rs::timeout::Timeout;
 
 
 #[tokio::main]
@@ -47,8 +46,7 @@ async fn main() {
         current_dispatch: None,
       });
     }
-  ).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
-    .finish();
+  ).custom_method("getCompletionsCycling", Backend::get_completions_cycling).finish();
   Server::new(stdin, stdout, socket)
     .serve(service)
     .await;
