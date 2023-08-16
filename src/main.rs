@@ -1,10 +1,11 @@
-use dashmap::DashMap;
-use std::{sync::{Arc, atomic::{Ordering, AtomicBool, AtomicU16}, RwLock}, collections::HashMap};
+
+use std::{sync::{Arc, RwLock}, collections::HashMap};
 use copilot_rs::{backend::Backend, auth};
-use tower_lsp::{LspService, Server};
-use reqwest::{header::{HeaderMap, HeaderValue}, ClientBuilder};
-use tower::{Layer, Service};
-use std::sync::{Mutex, Condvar};
+use tower_lsp::{LspService, Server, jsonrpc::router::Router, ExitedError};
+use reqwest::{header::{HeaderMap, HeaderValue}};
+use tower_lsp::jsonrpc::router;
+
+
 
 #[tokio::main]
 async fn main() {
@@ -37,12 +38,14 @@ async fn main() {
   let http_client = client_builder.build().unwrap();
 
 
-  let (service, socket) = LspService::build(|client|
-   Backend {
-    client,
-    documents: Arc::new(RwLock::new(HashMap::new())),
-    http_client: Arc::new(http_client),
-    current_dispatch: None,
+  let (service, socket) = LspService::build_mod_router(
+    |client| {
+      return tower_lsp::jsonrpc::router::Router::new(Backend {
+        client: client.clone(),
+        documents: Arc::new(RwLock::new(HashMap::new())),
+        http_client: Arc::new(http_client),
+        current_dispatch: None,
+      });
     }
   ).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
     .finish();
