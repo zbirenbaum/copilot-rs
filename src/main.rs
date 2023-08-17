@@ -1,10 +1,7 @@
 use std::{sync::{Arc, RwLock}, collections::HashMap};
 use copilot_rs::{backend::Backend, auth};
-use tower_lsp::{LspService, Server, jsonrpc::router::Router, ExitedError};
+use tower_lsp::{LspService, Server, ExitedError};
 use reqwest::{header::{HeaderMap, HeaderValue}};
-use tower_lsp::jsonrpc::router;
-use copilot_rs::timeout::Timeout;
-
 
 #[tokio::main]
 async fn main() {
@@ -35,20 +32,18 @@ async fn main() {
   let client_builder = reqwest::Client::builder()
     .default_headers(header_map);
   let http_client = client_builder.build().unwrap();
-
-
-  let (service, socket) = LspService::build_mod_router(
-    |client| {
-      return tower_lsp::jsonrpc::router::Router::new(Backend {
+  let (service, socket) = LspService::build(
+    |client|
+      Backend {
         client: client.clone(),
         documents: Arc::new(RwLock::new(HashMap::new())),
         http_client: Arc::new(http_client),
         current_dispatch: None,
-      });
-    }
+        runner: copilot_rs::debounce::Runner::new(tokio::time::Duration::from_millis(100))
+      }
   ).custom_method("getCompletionsCycling", Backend::get_completions_cycling).finish();
+
   Server::new(stdin, stdout, socket)
     .serve(service)
     .await;
-  // tracing_subscriber::fmt().init();
 }

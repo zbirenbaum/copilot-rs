@@ -1,6 +1,7 @@
 use crate::parse::DocumentCompletionParams;
 use crate::{copilot, parse, request::build_request};
 use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion};
+use crate::debounce;
 use async_std::task::yield_now;
 use futures_util::stream::PollNext;
 use ropey::Rope;
@@ -51,6 +52,7 @@ pub struct Backend {
   pub documents: SafeMap,
   pub http_client: Arc<reqwest::Client>,
   pub current_dispatch: Option<AbortHandle>,
+  pub runner: debounce::Runner,
 }
 
 fn handle_event(
@@ -129,6 +131,14 @@ impl Backend {
   }
 
   pub async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
+    let valid = self.runner.increment_and_do_stuff().await;
+    if !valid {
+      return Ok(CopilotCompletionResponse{
+        cancellation_reason: Some("More Recent".to_string()),
+        completions: vec![]
+      });
+    }
+
     let pos = params.text_document_position.position.clone();
     let uri = params.text_document_position.text_document.uri.to_string();
     let doc = self.get_doc_info(&uri).unwrap();
