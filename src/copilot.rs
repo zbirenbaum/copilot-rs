@@ -1,5 +1,6 @@
 use futures_util::{StreamExt, FutureExt};
-use eventsource_stream::{Eventsource};
+use ropey::Rope;
+use eventsource_stream::Eventsource;
 use tower_lsp::lsp_types::*;
 use serde_derive::{Deserialize, Serialize};
 
@@ -42,7 +43,7 @@ pub async fn on_cancel() -> CopilotCompletionResponse {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CopilotCompletionResponse {
   pub completions: Vec<CopilotCyclingCompletion>,
   pub cancellation_reason: Option<String>,
@@ -196,33 +197,12 @@ impl CopilotEditorInfo {
   }
 }
 
-  // editorConfiguration = {
-  //   disabledLanguages = { {
-  //       languageId = "."
-  //     }, {
-  //       languageId = "cvs"
-  //     }, {
-  //       languageId = "gitcommit"
-  //     }, {
-  //       languageId = "gitrebase"
-  //     }, {
-  //       languageId = "help"
-  //     }, {
-  //       languageId = "hgcommit"
-  //     }, {
-  //       languageId = "markdown"
-  //     }, {
-  //       languageId = "svn"
-  //     }, {
-  //       languageId = "yaml"
-  //     } },
-  //   enableAutoCompletions = true
-  // },
-  // editorInfo = {
-  //   name = "Neovim",
-  //   version = "0.10.0-dev-481+g0329f5c2f + Node.js 18.15.0"
-  // },
-  // editorPluginInfo = {
-  //   name = "copilot.lua",
-  //   version = "1.10.1"
-  // }
+pub struct DocParams {
+  pub rope: Rope,
+  pub uri: String,
+  pub pos: Position,
+  pub language: String,
+  pub line_before: String,
+  pub prefix: String,
+  pub suffix: String
+}

@@ -1,12 +1,11 @@
-use crate::{parse, request::build_request};
-use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion, CopilotEditorInfo};
-use crate::debounce;
+use crate::{parse, debounce, cache, request::build_request};
+use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion, CopilotEditorInfo, DocParams};
 use futures_util::stream::PollNext;
 use ropey::Rope;
 use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::{jsonrpc::{Error, Result},lsp_types::*,  {Client, LanguageServer}};
+use tower_lsp::{jsonrpc::{Error, Result}, lsp_types::*, Client, LanguageServer, LspService, Server};
 use dashmap::DashMap;
 use std::{
   borrow::Cow,
@@ -15,20 +14,27 @@ use std::{
   collections::HashMap,
   time::{Duration, Instant},
   sync::{
-    mpsc::channel, RwLock, Arc, Condvar, Mutex
+    mpsc::channel, RwLock, Arc, Mutex
   }
 };
-use tower_lsp::{LspService, Server};
+use tower_lsp::{};
 use reqwest::header::{HeaderMap, HeaderValue};
 use futures::future::{Abortable, AbortHandle, Aborted};
 use tokio::time;
 use futures_util::{StreamExt, FutureExt};
-use eventsource_stream::{Eventsource};
-use futures::{future, task::{Poll}};
+use eventsource_stream::Eventsource;
+use futures::{future, task::Poll};
 
 #[derive(Deserialize, Serialize, Debug)]
+pub struct Success {
+  success: bool
+}
+impl Success {
+  pub fn new(success: bool) -> Self { Self { success } }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[derive(Clone)]
 pub struct TextDocumentItem {
   pub uri: String,
   pub text: String,
@@ -45,6 +51,8 @@ pub struct Backend {
   pub http_client: Arc<reqwest::Client>,
   pub current_dispatch: Option<AbortHandle>,
   pub runner: debounce::Runner,
+  pub editor_info: Arc<RwLock<CopilotEditorInfo>>,
+  pub cache: cache::CopilotCache
 }
 
 fn handle_event(
@@ -57,15 +65,6 @@ fn handle_event(
     Ok(data) => { CopilotResponse::Answer(data) }
     Err(e) => { CopilotResponse::Error(e.to_string()) }
   }
-}
-
-struct DocParams {
-  rope: Rope,
-  uri: String,
-  language: String,
-  line_before: String,
-  prefix: String,
-  suffix: String
 }
 
 pub async fn await_stream(req: RequestBuilder, line_before: String, pos: Position) -> Vec<String> {
@@ -122,12 +121,38 @@ impl Backend {
     }
   }
 
-  pub async fn set_editor_info(&self, params: CopilotEditorInfo) {
+  pub async fn set_editor_info(&self, params: CopilotEditorInfo) -> Result<Success> {
+    self.client.log_message(MessageType::INFO, "setEditorInfo").await;
+    let copy = Arc::clone(&self.editor_info);
+    let mut lock = copy.write().unwrap();
+    *lock = params;
+    return Ok(Success::new(true));
+  }
+  pub fn get_doc_params(&self, params: &CompletionParams) -> DocParams {
+    let pos = params.text_document_position.position.clone();
+    let uri = params.text_document_position.text_document.uri.to_string();
+    let doc = self.get_doc_info(&uri).unwrap();
+    let rope = ropey::Rope::from_str(&doc.text);
+    let offset = parse::position_to_offset(pos, &rope).unwrap();
 
-    self.client.log_message(MessageType::ERROR, "setinfo").await;
+    DocParams {
+      uri: uri.to_string(),
+      pos: pos.clone(),
+      language: doc.language_id.to_string(),
+      prefix: parse::get_text_before(offset, &rope).unwrap(),
+      suffix: parse::get_text_after(offset, &rope).unwrap(),
+      line_before: parse::get_line_before(pos, &rope).unwrap().to_string(),
+      rope,
+    }
   }
 
   pub async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
+    let doc_params = self.get_doc_params(&params);
+    let cached_result = self.cache.get_cached_result(&doc_params.uri, doc_params.pos.line);
+    if cached_result.is_some() {
+      return Ok(cached_result.unwrap());
+    }
+
     let valid = self.runner.increment_and_do_stuff().await;
     if !valid {
       return Ok(CopilotCompletionResponse {
@@ -136,22 +161,7 @@ impl Backend {
       });
     }
 
-    let pos = params.text_document_position.position.clone();
-    let uri = params.text_document_position.text_document.uri.to_string();
-    let doc = self.get_doc_info(&uri).unwrap();
-    let rope = ropey::Rope::from_str(&doc.text);
-    let offset = parse::position_to_offset(pos, &rope).unwrap();
-
-    let doc_params = DocParams {
-      uri: uri.to_string(),
-      language: doc.language_id.to_string(),
-      prefix: parse::get_text_before(offset, &rope).unwrap(),
-      suffix: parse::get_text_after(offset, &rope).unwrap(),
-      line_before: parse::get_line_before(pos, &rope).unwrap().to_string(),
-      rope,
-    };
-    drop(doc);
-
+    let doc_params = self.get_doc_params(&params);
     let line_before = doc_params.line_before.to_string();
     let http_client = Arc::clone(&self.http_client);
     let _prompt = format!(
@@ -159,9 +169,21 @@ impl Backend {
       doc_params.uri,
       doc_params.prefix.to_string()
     );
+
     let req = build_request(http_client, doc_params.language, doc_params.prefix, doc_params.suffix);
-    let completion_list = await_stream(req, line_before.to_string(), params.text_document_position.position.clone());
-    Ok(CopilotCompletionResponse::from_str_vec(completion_list.await, line_before, pos))
+
+    let completion_list = await_stream(
+      req,
+      line_before.to_string(),
+      params.text_document_position.position.clone()
+    );
+    let response = CopilotCompletionResponse::from_str_vec(
+      completion_list.await,
+      line_before,
+      doc_params.pos
+    );
+    self.cache.set_cached_result(&doc_params.uri, &doc_params.pos.line, &response);
+    Ok(response)
   }
 }
 

@@ -1,7 +1,7 @@
 use std::{sync::{Arc, RwLock}, collections::HashMap};
-use copilot_rs::{backend::Backend, auth};
+use copilot_rs::{backend::Backend, auth, copilot::CopilotEditorInfo, cache::CopilotCache};
 use tower_lsp::{LspService, Server};
-use reqwest::{header::{HeaderMap, HeaderValue}};
+use reqwest::header::{HeaderMap, HeaderValue};
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +39,9 @@ async fn main() {
         documents: Arc::new(RwLock::new(HashMap::new())),
         http_client: Arc::new(http_client),
         current_dispatch: None,
-        runner: copilot_rs::debounce::Runner::new(tokio::time::Duration::from_millis(100))
+        runner: copilot_rs::debounce::Runner::new(tokio::time::Duration::from_millis(100)),
+        editor_info: Arc::new(RwLock::new(CopilotEditorInfo::default())),
+        cache: CopilotCache::new()
       }
   ).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
     .custom_method("setEditorInfo", Backend::set_editor_info)

@@ -7,3 +7,4 @@ pub mod parse;
 pub mod request;
 pub mod backend;
 pub mod debounce;
+pub mod cache;
