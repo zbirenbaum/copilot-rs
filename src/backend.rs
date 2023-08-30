@@ -1,8 +1,6 @@
-use crate::parse::DocumentCompletionParams;
-use crate::{copilot, parse, request::build_request};
-use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion};
+use crate::{parse, request::build_request};
+use crate::copilot::{CopilotCompletionResponse, CopilotResponse, CopilotCyclingCompletion, CopilotEditorInfo};
 use crate::debounce;
-use async_std::task::yield_now;
 use futures_util::stream::PollNext;
 use ropey::Rope;
 use reqwest::RequestBuilder;
@@ -14,16 +12,10 @@ use std::{
   borrow::Cow,
   str::FromStr,
   fmt::Debug,
-  thread,
   collections::HashMap,
-  time::{Duration,
-  Instant},
+  time::{Duration, Instant},
   sync::{
-    mpsc::channel, RwLock, Arc, Condvar, Mutex, atomic::{
-      Ordering,
-      AtomicBool,
-      AtomicU16
-    }
+    mpsc::channel, RwLock, Arc, Condvar, Mutex
   }
 };
 use tower_lsp::{LspService, Server};
@@ -130,10 +122,15 @@ impl Backend {
     }
   }
 
+  pub async fn set_editor_info(&self, params: CopilotEditorInfo) {
+
+    self.client.log_message(MessageType::ERROR, "setinfo").await;
+  }
+
   pub async fn get_completions_cycling(&self, params: CompletionParams) -> Result<CopilotCompletionResponse> {
     let valid = self.runner.increment_and_do_stuff().await;
     if !valid {
-      return Ok(CopilotCompletionResponse{
+      return Ok(CopilotCompletionResponse {
         cancellation_reason: Some("More Recent".to_string()),
         completions: vec![]
       });

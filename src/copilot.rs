@@ -85,6 +85,7 @@ impl CopilotCyclingCompletion {
     }
   }
 }
+
 fn create_item(
   text: String,
   line_before: &String,
@@ -142,3 +143,86 @@ pub async fn fetch_completions(
     }
   )
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LanguageEntry {
+  language_id: String
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorConfiguration {
+  disabled_languages: Vec<LanguageEntry>,
+  enable_auto_completions: bool,
+}
+
+impl EditorConfiguration {
+  pub fn default() -> Self {
+    Self {
+      disabled_languages: vec![], 
+      enable_auto_completions: true,
+    }
+  }
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EditorInfo {
+  name: String,
+  version: String
+}
+
+impl EditorInfo {
+  pub fn default() -> Self {
+    Self { name: "".to_string(), version: "".to_string() }
+  }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CopilotEditorInfo {
+  editor_configuration: EditorConfiguration,
+  editor_info: EditorInfo,
+  editor_plugin_info: EditorInfo,
+}
+
+impl CopilotEditorInfo {
+  pub fn default() -> Self {
+    Self {
+      editor_configuration: EditorConfiguration::default(),
+      editor_info: EditorInfo::default(),
+      editor_plugin_info: EditorInfo::default()
+    }
+  }
+}
+
+  // editorConfiguration = {
+  //   disabledLanguages = { {
+  //       languageId = "."
+  //     }, {
+  //       languageId = "cvs"
+  //     }, {
+  //       languageId = "gitcommit"
+  //     }, {
+  //       languageId = "gitrebase"
+  //     }, {
+  //       languageId = "help"
+  //     }, {
+  //       languageId = "hgcommit"
+  //     }, {
+  //       languageId = "markdown"
+  //     }, {
+  //       languageId = "svn"
+  //     }, {
+  //       languageId = "yaml"
+  //     } },
+  //   enableAutoCompletions = true
+  // },
+  // editorInfo = {
+  //   name = "Neovim",
+  //   version = "0.10.0-dev-481+g0329f5c2f + Node.js 18.15.0"
+  // },
+  // editorPluginInfo = {
+  //   name = "copilot.lua",
+  //   version = "1.10.1"
+  // }

@@ -1,6 +1,6 @@
 use std::{sync::{Arc, RwLock}, collections::HashMap};
 use copilot_rs::{backend::Backend, auth};
-use tower_lsp::{LspService, Server, ExitedError};
+use tower_lsp::{LspService, Server};
 use reqwest::{header::{HeaderMap, HeaderValue}};
 
 #[tokio::main]
@@ -41,7 +41,9 @@ async fn main() {
         current_dispatch: None,
         runner: copilot_rs::debounce::Runner::new(tokio::time::Duration::from_millis(100))
       }
-  ).custom_method("getCompletionsCycling", Backend::get_completions_cycling).finish();
+  ).custom_method("getCompletionsCycling", Backend::get_completions_cycling)
+    .custom_method("setEditorInfo", Backend::set_editor_info)
+    .finish();
 
   Server::new(stdin, stdout, socket)
     .serve(service)
